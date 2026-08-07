@@ -55,7 +55,9 @@ type PaintFilter struct {
 	Search string `json:"search"`
 	Type   string `json:"type"`
 	Brand  string `json:"brand"`
+	Range  string `json:"range"`
 	Owned  string `json:"owned"`
+	Limit  int    `json:"limit"` // 0 = everything
 }
 
 // PaintRow is a paint plus how many minis it's used on, so the table can show
@@ -65,13 +67,53 @@ type PaintRow struct {
 	UsedOn int `json:"usedOn"`
 }
 
-func (a *App) ListPaints(f PaintFilter) []PaintRow {
-	ps := a.store.Paints(f.Search, f.Type, f.Brand, f.Owned)
-	out := make([]PaintRow, 0, len(ps))
-	for _, p := range ps {
-		out = append(out, PaintRow{Paint: p, UsedOn: a.store.PaintUsage(p.ID)})
+// PaintPage is one screenful of the rack. Every collection is stocked with
+// well over a thousand paints and the table only draws a few hundred of them,
+// so sending the rest across on every keystroke is pure waste - Total is there
+// to say how many matched regardless of what came back.
+type PaintPage struct {
+	Rows  []PaintRow `json:"rows"`
+	Total int        `json:"total"`
+}
+
+func (a *App) ListPaints(f PaintFilter) PaintPage {
+	ps := a.store.Paints(f.Search, f.Type, f.Brand, f.Range, f.Owned)
+	page := PaintPage{Total: len(ps), Rows: []PaintRow{}}
+	if f.Limit > 0 && len(ps) > f.Limit {
+		ps = ps[:f.Limit]
 	}
-	return out
+	for _, p := range ps {
+		page.Rows = append(page.Rows, PaintRow{Paint: p, UsedOn: a.store.PaintUsage(p.ID)})
+	}
+	return page
+}
+
+// PaintFacets is everything the inventory screen needs to draw its filter bar
+// and its counts, so it doesn't have to pull the whole rack down to work them
+// out for itself.
+type PaintFacets struct {
+	Brands []string `json:"brands"`
+	Ranges []string `json:"ranges"`
+	Brand  string   `json:"brand"` // the requested brand, or "" if it's gone
+	Total  int      `json:"total"`
+	Owned  int      `json:"owned"`
+}
+
+// Facets reports the brands on offer and, for the brand asked about, its
+// ranges. A brand that no longer exists - the last paint of it was deleted,
+// say - comes back as an empty Brand so the screen can fall back to showing
+// everything instead of filtering on something that matches nothing.
+func (a *App) Facets(brand string) PaintFacets {
+	f := PaintFacets{Brands: a.store.Brands()}
+	for _, b := range f.Brands {
+		if b == brand {
+			f.Brand = brand
+			break
+		}
+	}
+	f.Ranges = a.store.Ranges(f.Brand)
+	f.Total, f.Owned = a.store.PaintCounts()
+	return f
 }
 
 func (a *App) AllPaints() []Paint   { return a.store.AllPaints() }
@@ -125,8 +167,8 @@ func (a *App) SavePaint(p Paint) (Paint, error) {
 	if strings.TrimSpace(p.Name) == "" {
 		return Paint{}, fmt.Errorf("please give the paint a name")
 	}
-	if !isHexColour(p.Hex) {
-		return Paint{}, fmt.Errorf("colour should look like #3f7ac2")
+	if !isHexColor(p.Hex) {
+		return Paint{}, fmt.Errorf("color should look like #3f7ac2")
 	}
 	return a.store.SavePaint(p)
 }
@@ -150,9 +192,10 @@ func (a *App) SaveTip(t Tip) (Tip, error) {
 
 func (a *App) DeleteTip(id int) error { return a.store.DeleteTip(id) }
 
-func (a *App) AddStarterPaints() (int, error) { return a.store.AddStarterPaints() }
+// RestoreLibraryPaints puts back built-in paints the user has deleted.
+func (a *App) RestoreLibraryPaints() (int, error) { return a.store.RestoreLibraryPaints() }
 
-func isHexColour(s string) bool {
+func isHexColor(s string) bool {
 	if len(s) != 7 && len(s) != 4 {
 		return false
 	}
