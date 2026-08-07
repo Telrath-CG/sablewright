@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-// The built-in paint library: the five ranges every new collection starts with.
+// The built-in paint library: the six ranges every new collection starts with.
 // It lives in a JSON file rather than a Go literal purely because there are
 // over a thousand entries - a table that size is easier to regenerate and
 // easier to read as data than as source.
@@ -22,10 +22,40 @@ import (
 // carry the suffix the pot does: "The Fang - Air". Without it the rack would
 // show two identical-looking rows and no way to tell which one you own.
 //
+// Kimera is the exception to the sourcing above, and worth knowing about
+// before trusting one of its swatches. It arrives as two halves that are
+// sourced differently.
+//
+// The Pure line - Base Set, Colors of Nature, Shifted Primaries - is single
+// pigments. Those pots carry no catalogue number, so the code is the Colour
+// Index pigment index instead: PW6, PBk7, PB15:4, which is what is printed on
+// the bottle and what painters look the range up by. That makes the code
+// non-unique, unlike every other brand here - Red Oxide and Mars Orange are
+// both PR101, and the three Oxide Browns are all PBr11. Nothing depends on
+// codes being unique, but a lookup keyed on one would be wrong. No source
+// publishes hex for the range, so the swatches are derived from each pigment's
+// masstone.
+//
+// The six artist Signature Blends are mixes, so they have neither a pigment
+// index (hence no code at all) nor a masstone to work from. Their swatches
+// start from the ISCC-NBS color descriptor paintpad.app publishes per pot -
+// "Very dark greenish blue", "Light greyish olive" - and use the paint's name
+// only to separate two pots sharing a descriptor, as with Karlsson's Pink Skin
+// and Salmon Skin, both "Strong red".
+//
+// Either way these are the roughest swatches in the file: fine for finding a
+// bottle on a shelf, not for matching a color.
+//
+// The four Pure colors the maker marks "Transparent" are typed Glaze; the rest
+// of the brand is opaque and typed Base. The line is artists' acrylic rather
+// than a hobby range, so no type in the app fits it exactly.
+//
 // Known gaps, so nobody goes hunting for a bug that isn't one: the Citadel
 // spray cans are left out, and so are Two Thin Coats' six effect paints, for
-// which no source lists a color. Both can still be added by hand like any
-// other paint.
+// which no source lists a color. From Kimera, the Velvet Inks and Velvet Light
+// Blender sets are out - they are a separate line from the Pure pigments and
+// the Signature Blends, and no source lists them pot by pot. All can still be
+// added by hand like any other paint.
 //
 //go:embed paintlibrary.json
 var paintLibraryJSON []byte
@@ -51,7 +81,7 @@ func PaintLibrary() []Paint {
 // introduced to the user.
 var LibraryBrands = []string{
 	"Warhammer Colour", "Pro Acryl", "Ionic Smart Colors",
-	"AK Interactive", "Two Thin Coats",
+	"AK Interactive", "Two Thin Coats", "Kimera Kolors",
 }
 
 // RenamedBrands maps brands that have since been renamed by their maker onto

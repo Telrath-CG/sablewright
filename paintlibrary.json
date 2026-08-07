@@ -5328,6 +5328,566 @@
   "hex": "#d9b688"
  },
  {
+  "brand": "Kimera Kolors",
+  "name": "Carbon Black",
+  "range": "Base Set",
+  "code": "PBk7",
+  "type": "Base",
+  "hex": "#1a1a1a"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Cold Yellow",
+  "range": "Base Set",
+  "code": "PY151",
+  "type": "Base",
+  "hex": "#f5d012"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Magenta",
+  "range": "Base Set",
+  "code": "PR122",
+  "type": "Base",
+  "hex": "#ad2a6b"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Phthalo Blue (Green Shade)",
+  "range": "Base Set",
+  "code": "PB15:4",
+  "type": "Base",
+  "hex": "#005f83"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Phthalo Blue (Red Shade)",
+  "range": "Base Set",
+  "code": "PB15:2",
+  "type": "Base",
+  "hex": "#16326d"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Phthalo Green",
+  "range": "Base Set",
+  "code": "PG7",
+  "type": "Base",
+  "hex": "#0a4f43"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Red Oxide",
+  "range": "Base Set",
+  "code": "PR101",
+  "type": "Base",
+  "hex": "#8d3527"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Satin Medium",
+  "range": "Base Set",
+  "code": "",
+  "type": "Technical",
+  "hex": "#ebebe8"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "The Orange",
+  "range": "Base Set",
+  "code": "PO34",
+  "type": "Base",
+  "hex": "#e35a1c"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "The Red",
+  "range": "Base Set",
+  "code": "PR170",
+  "type": "Base",
+  "hex": "#cc2229"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "The Violet",
+  "range": "Base Set",
+  "code": "PV23",
+  "type": "Base",
+  "hex": "#3a1d5c"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "The White",
+  "range": "Base Set",
+  "code": "PW6",
+  "type": "Base",
+  "hex": "#f4f3ef"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Warm Yellow",
+  "range": "Base Set",
+  "code": "PY83",
+  "type": "Base",
+  "hex": "#e9a413"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Yellow Oxide",
+  "range": "Base Set",
+  "code": "PY42",
+  "type": "Base",
+  "hex": "#b7822c"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Cartacci Red",
+  "range": "Cartacci - Never Without",
+  "code": "",
+  "type": "Base",
+  "hex": "#be1e32"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Caucasian Skintone",
+  "range": "Cartacci - Never Without",
+  "code": "",
+  "type": "Base",
+  "hex": "#d98e50"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Golden Brown",
+  "range": "Cartacci - Never Without",
+  "code": "",
+  "type": "Base",
+  "hex": "#996515"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Kiwi Brown",
+  "range": "Cartacci - Never Without",
+  "code": "",
+  "type": "Base",
+  "hex": "#867e36"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Samurai Green",
+  "range": "Cartacci - Never Without",
+  "code": "",
+  "type": "Base",
+  "hex": "#008882"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Silver Grey",
+  "range": "Cartacci - Never Without",
+  "code": "",
+  "type": "Base",
+  "hex": "#8c939b"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Alizarin Crimson",
+  "range": "Colors of Nature",
+  "code": "PR179",
+  "type": "Glaze",
+  "hex": "#7b2330"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Cobalt Bluegreen",
+  "range": "Colors of Nature",
+  "code": "PB36",
+  "type": "Glaze",
+  "hex": "#1a6b7e"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Dark Ochre",
+  "range": "Colors of Nature",
+  "code": "PBr48",
+  "type": "Base",
+  "hex": "#7d4f21"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Diarylide Yellow",
+  "range": "Colors of Nature",
+  "code": "PY170",
+  "type": "Base",
+  "hex": "#edb417"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Honey Moon Yellow",
+  "range": "Colors of Nature",
+  "code": "PBr24",
+  "type": "Base",
+  "hex": "#d09a3a"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Mars Orange",
+  "range": "Colors of Nature",
+  "code": "PR101",
+  "type": "Base",
+  "hex": "#b4501e"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Oxide Brown Dark",
+  "range": "Colors of Nature",
+  "code": "PBr11",
+  "type": "Base",
+  "hex": "#5d3a20"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Oxide Brown Light",
+  "range": "Colors of Nature",
+  "code": "PBr11",
+  "type": "Base",
+  "hex": "#a97442"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Oxide Brown Medium",
+  "range": "Colors of Nature",
+  "code": "PBr11",
+  "type": "Base",
+  "hex": "#85562d"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Oxide Green",
+  "range": "Colors of Nature",
+  "code": "PG17",
+  "type": "Base",
+  "hex": "#4b6743"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Purple",
+  "range": "Colors of Nature",
+  "code": "PV19",
+  "type": "Base",
+  "hex": "#6d2c72"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Royal Brown",
+  "range": "Colors of Nature",
+  "code": "PBr25",
+  "type": "Glaze",
+  "hex": "#5c2e1c"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Toluidine Red",
+  "range": "Colors of Nature",
+  "code": "PR3",
+  "type": "Base",
+  "hex": "#d43420"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Ultramarine Blue",
+  "range": "Colors of Nature",
+  "code": "PB29",
+  "type": "Glaze",
+  "hex": "#2b3f8f"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Blue Black",
+  "range": "Karlsson - Dark Fairy Tales",
+  "code": "",
+  "type": "Base",
+  "hex": "#102730"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Fuchsia Skin",
+  "range": "Karlsson - Dark Fairy Tales",
+  "code": "",
+  "type": "Base",
+  "hex": "#ce4676"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Gold 79",
+  "range": "Karlsson - Dark Fairy Tales",
+  "code": "",
+  "type": "Base",
+  "hex": "#a06f1c"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Pink Skin",
+  "range": "Karlsson - Dark Fairy Tales",
+  "code": "",
+  "type": "Base",
+  "hex": "#c9515f"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Salmon Skin",
+  "range": "Karlsson - Dark Fairy Tales",
+  "code": "",
+  "type": "Base",
+  "hex": "#cf6a5a"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Sea Blue",
+  "range": "Karlsson - Dark Fairy Tales",
+  "code": "",
+  "type": "Base",
+  "hex": "#0085a1"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Black Skintone",
+  "range": "Masclans - Skin Kolors",
+  "code": "",
+  "type": "Base",
+  "hex": "#2e1d21"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Ivory Light",
+  "range": "Masclans - Skin Kolors",
+  "code": "",
+  "type": "Base",
+  "hex": "#f0ead6"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Middle Brown",
+  "range": "Masclans - Skin Kolors",
+  "code": "",
+  "type": "Base",
+  "hex": "#593319"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Pale Carmine Red",
+  "range": "Masclans - Skin Kolors",
+  "code": "",
+  "type": "Base",
+  "hex": "#ab4e52"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Pumpskin",
+  "range": "Masclans - Skin Kolors",
+  "code": "",
+  "type": "Base",
+  "hex": "#d9873f"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Shiny Skintone",
+  "range": "Masclans - Skin Kolors",
+  "code": "",
+  "type": "Base",
+  "hex": "#fbc97f"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Cloud Sky",
+  "range": "Pisarski - Non Metallic Metal",
+  "code": "",
+  "type": "Base",
+  "hex": "#ae9b82"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Fallen Grass",
+  "range": "Pisarski - Non Metallic Metal",
+  "code": "",
+  "type": "Base",
+  "hex": "#8c8776"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Ground Brown",
+  "range": "Pisarski - Non Metallic Metal",
+  "code": "",
+  "type": "Base",
+  "hex": "#635147"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Iron Hue",
+  "range": "Pisarski - Non Metallic Metal",
+  "code": "",
+  "type": "Base",
+  "hex": "#8b8c8d"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Morning Sky",
+  "range": "Pisarski - Non Metallic Metal",
+  "code": "",
+  "type": "Base",
+  "hex": "#00617f"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Sun Ray",
+  "range": "Pisarski - Non Metallic Metal",
+  "code": "",
+  "type": "Base",
+  "hex": "#e6e29a"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Cherry Wood",
+  "range": "Richiero - Pastel Notes",
+  "code": "",
+  "type": "Base",
+  "hex": "#80461b"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Cold Armour",
+  "range": "Richiero - Pastel Notes",
+  "code": "",
+  "type": "Base",
+  "hex": "#4c516d"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Dark Mud",
+  "range": "Richiero - Pastel Notes",
+  "code": "",
+  "type": "Base",
+  "hex": "#483c28"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Peach Skin",
+  "range": "Richiero - Pastel Notes",
+  "code": "",
+  "type": "Base",
+  "hex": "#fab57f"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Soft Green",
+  "range": "Richiero - Pastel Notes",
+  "code": "",
+  "type": "Base",
+  "hex": "#3b7861"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Tooth and Nails",
+  "range": "Richiero - Pastel Notes",
+  "code": "",
+  "type": "Base",
+  "hex": "#c7ada3"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Bone Khaki",
+  "range": "Russo - The Dark Side of Paint",
+  "code": "",
+  "type": "Base",
+  "hex": "#8c8767"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Dark Honey",
+  "range": "Russo - The Dark Side of Paint",
+  "code": "",
+  "type": "Base",
+  "hex": "#574321"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Darkness",
+  "range": "Russo - The Dark Side of Paint",
+  "code": "",
+  "type": "Base",
+  "hex": "#202428"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Deep Rusto",
+  "range": "Russo - The Dark Side of Paint",
+  "code": "",
+  "type": "Base",
+  "hex": "#54194e"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Poison Green",
+  "range": "Russo - The Dark Side of Paint",
+  "code": "",
+  "type": "Base",
+  "hex": "#454d20"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Viridian Grim",
+  "range": "Russo - The Dark Side of Paint",
+  "code": "",
+  "type": "Base",
+  "hex": "#3a4b42"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Emerald Green",
+  "range": "Shifted Primaries",
+  "code": "PG36",
+  "type": "Base",
+  "hex": "#00674a"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Indigo",
+  "range": "Shifted Primaries",
+  "code": "PB60",
+  "type": "Base",
+  "hex": "#26355e"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Permanent Yellow",
+  "range": "Shifted Primaries",
+  "code": "PY14",
+  "type": "Base",
+  "hex": "#f0bd18"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Perylene Violet",
+  "range": "Shifted Primaries",
+  "code": "PV29",
+  "type": "Base",
+  "hex": "#4e2733"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Scarlet",
+  "range": "Shifted Primaries",
+  "code": "PR255",
+  "type": "Base",
+  "hex": "#e03a20"
+ },
+ {
+  "brand": "Kimera Kolors",
+  "name": "Turquoise Deep",
+  "range": "Shifted Primaries",
+  "code": "PB16",
+  "type": "Base",
+  "hex": "#00706e"
+ },
+ {
   "brand": "Pro Acryl",
   "name": "AdeptiCon Spray-Team Bright Shadow Flesh",
   "range": "Primer",
