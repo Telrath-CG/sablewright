@@ -126,6 +126,21 @@ func (a *App) GetStats() Stats      { return a.store.Stats() }
 func (a *App) DataFolder() string   { return a.store.Dir() }
 func (a *App) StartupError() string { e := a.loadErr; a.loadErr = ""; return e }
 
+// Version identifies the running build for the sidebar. The commit earns its
+// place next to the number: every merge to main replaces the same rolling
+// release, so two downloads a week apart both call themselves v1.1.0 and only
+// the hash says which one a bug report is about.
+func (a *App) Version() string {
+	s := version
+	if s != "dev" {
+		s = "v" + s
+	}
+	if commit != "" {
+		s += " (" + commit + ")"
+	}
+	return s
+}
+
 type TipFilter struct {
 	Search   string `json:"search"`
 	Category string `json:"category"`
