@@ -44,13 +44,31 @@ contents:
 overrides:
   deb:
     depends:
+      # The binary is built on Ubuntu 22.04, so glibc 2.35 is the floor.
+      # nfpm doesn't run shlibdeps, so nothing works this out on its own:
+      # without it the package installs happily on Debian 11 and then dies at
+      # launch with a linker error, instead of apt refusing it up front.
+      - libc6 (>= 2.35)
       # Ubuntu 24.04's 64-bit time_t transition renamed libgtk-3-0 to
       # libgtk-3-0t64. The replacement does declare Provides: libgtk-3-0, but
       # spelling the alternative out says so plainly rather than depending on
       # a reader knowing that.
       - libgtk-3-0 | libgtk-3-0t64
       - libwebkit2gtk-4.1-0
+  rpm:
+    # Sonames rather than package names, because the names disagree across
+    # the RPM distributions: Fedora calls the WebKit package webkit2gtk4.1
+    # and openSUSE calls it libwebkit2gtk-4_1-0. Both provide the same
+    # soname, which is what rpm actually resolves against and what rpmbuild
+    # would have generated here by itself. The glibc floor comes free with
+    # that, expressed as the symbol version it needs.
+    depends:
+      - "libgtk-3.so.0()(64bit)"
+      - "libwebkit2gtk-4.1.so.0()(64bit)"
+      - "libc.so.6(GLIBC_2.35)(64bit)"
   archlinux:
+    # No glibc floor here: Arch is a rolling release, so its glibc is never
+    # older than the one this was built against.
     depends:
       - gtk3
       - webkit2gtk-4.1
