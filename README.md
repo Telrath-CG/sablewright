@@ -41,7 +41,7 @@ highlights."* Entries show newest-first as a timeline on the mini's detail
 panel, and the total time is tallied per mini and across the collection. If a
 mini has no start date, the earliest log entry becomes it.
 
-**Paint Inventory** — the rack comes stocked with 1,349 paints across five
+**Paint Inventory** — the rack comes stocked with 1,419 paints across six
 ranges, so you tick off what you own rather than typing it all in:
 
 | Range | Paints | Covering |
@@ -51,10 +51,16 @@ ranges, so you tick off what you own rather than typing it all in:
 | Ionic Smart Colors | 180 | the full range |
 | Two Thin Coats | 180 | waves 1–3 |
 | Pro Acryl | 131 | Pro Acryl, Signature Series, primers, washes |
+| Kimera Kolors | 70 | the Pure line (Base Set, Colors of Nature, Shifted Primaries) and all six artist Signature Blends |
 
 Each carries its real color, its maker's range and catalogue code, and how many
 minis it's on. Citadel Air paints mostly share a name with a Base or Layer
-paint, so they're listed the way the pot is labelled — *The Fang - Air*. Filter by brand, range, type or ownership, or search across names,
+paint, so they're listed the way the pot is labelled — *The Fang - Air*. Kimera
+pots carry no catalogue number, so the Pure pigments are listed by the pigment
+index printed on the bottle instead — *PW6*, *PBk7* — while the Signature
+Blends, being mixes, carry no code at all. Kimera's swatches are approximated
+rather than taken from a database, so they're the roughest in the set. Filter
+by brand, range, type or ownership, or search across names,
 ranges and product codes. Everything is editable and nothing is fixed: the brand
 and range fields are free text with autocomplete, so any paint from any maker can
 be added, and deleting one is permanent unless you ask for the built-in set back.
