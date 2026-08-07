@@ -517,6 +517,11 @@ select:focus { border-color: var(--accent); }
 .check { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 14px; }
 .check input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 
+/* the paints picker reuses the screens' filter bar, but a modal is narrower
+   than a page - let the search box take whatever the brand select leaves */
+.modal .filters { margin-bottom: 10px; }
+.modal .filters .search { flex: 1; min-width: 180px; }
+
 .picker { border: 1px solid var(--border); border-radius: 8px; background: var(--input-bg);
           max-height: 300px; overflow-y: auto; }
 .picker label {
