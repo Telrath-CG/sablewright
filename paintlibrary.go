@@ -32,19 +32,30 @@ import (
 // the bottle and what painters look the range up by. That makes the code
 // non-unique, unlike every other brand here - Red Oxide and Mars Orange are
 // both PR101, and the three Oxide Browns are all PBr11. Nothing depends on
-// codes being unique, but a lookup keyed on one would be wrong. No source
-// publishes hex for the range, so the swatches are derived from each pigment's
-// masstone.
+// codes being unique, but a lookup keyed on one would be wrong.
 //
 // The six artist Signature Blends are mixes, so they have neither a pigment
-// index (hence no code at all) nor a masstone to work from. Their swatches
-// start from the ISCC-NBS color descriptor paintpad.app publishes per pot -
-// "Very dark greenish blue", "Light greyish olive" - and use the paint's name
-// only to separate two pots sharing a descriptor, as with Karlsson's Pink Skin
-// and Salmon Skin, both "Strong red".
+// index (hence no code at all) nor a masstone to work from.
 //
-// Either way these are the roughest swatches in the file: fine for finding a
-// bottle on a shelf, not for matching a color.
+// The miniature-paints table does cover Kimera, but only 39 of the 70 pots:
+// all of Base Set bar Satin Medium, all of Colors of Nature, and the Cartacci
+// and Pisarski blends. Those take its hex. It spells six of them loosely -
+// "Phtalo Green", "Phthalo Blu (Green Shade)", "Cloudy Sky" - but the pigment
+// code identifies each one, so the names stay as the maker prints them.
+//
+// The other 31 have no published hex and are derived instead. The Pure pots
+// come from each pigment's masstone; the Karlsson, Masclans, Richiero and
+// Russo blends start from the ISCC-NBS color descriptor paintpad.app publishes
+// per pot - "Very dark greenish blue", "Light greyish olive" - and use the
+// paint's name only to separate two pots sharing a descriptor, as with
+// Karlsson's Pink Skin and Salmon Skin, both "Strong red". Those 31 are the
+// roughest swatches in the file: fine for finding a bottle on a shelf, not for
+// matching a color.
+//
+// Three of the sourced values sit oddly against their pigment - Phthalo Green
+// is desaturated at #344c50, and both phthalo blues land violet of where PB15
+// normally reads. They stand because a published swatch beats a derived one,
+// but they are the first to replace if a measured source turns up.
 //
 // The four Pure colors the maker marks "Transparent" are typed Glaze; the rest
 // of the brand is opaque and typed Base. The line is artists' acrylic rather
