@@ -728,7 +728,7 @@ func (s *Store) SaveTip(t Tip) (Tip, error) {
 			}
 		}
 		if !found {
-			return Tip{}, fmt.Errorf("that tip no longer exists")
+			return Tip{}, fmt.Errorf("that note no longer exists")
 		}
 	}
 	return t, s.persist()

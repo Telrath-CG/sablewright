@@ -177,7 +177,7 @@ func (a *App) DeletePaint(id int) error { return a.store.DeletePaint(id) }
 
 func (a *App) SaveTip(t Tip) (Tip, error) {
 	if strings.TrimSpace(t.Title) == "" {
-		return Tip{}, fmt.Errorf("please give the tip a title")
+		return Tip{}, fmt.Errorf("please give the note a title")
 	}
 	clean := make([]string, 0, len(t.Tags))
 	for _, tag := range t.Tags {
