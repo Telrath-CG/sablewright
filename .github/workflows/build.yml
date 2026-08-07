@@ -100,10 +100,33 @@ jobs:
         if: runner.os == 'Windows'
         run: wails build -platform windows/amd64 -webview2 embed -ldflags "-w -s"
 
+      # windows-latest is Windows Server 2025, and that image dropped the NSIS
+      # that windows-2022 shipped, so makensis has to be installed explicitly.
+      # Chocolatey is preinstalled on the image; winget is not present on it at
+      # all (it ships with Windows 11 as an App Installer package, not with
+      # Server), so choco is the only option here rather than the nicer one.
+      - name: Install NSIS (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          choco install nsis -y --no-progress
+          "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
       - name: Build installer (Windows)
         if: runner.os == 'Windows'
         run: wails build -platform windows/amd64 -webview2 embed -nsis -ldflags "-w -s"
-        continue-on-error: true      # the plain .exe is the important artifact
+
+      # Wails only *warns* when makensis is missing, so the step above exits 0
+      # having produced nothing. That is exactly how a silently-broken
+      # installer survived the whole life of this workflow, so assert on the
+      # file rather than trusting the exit code.
+      - name: Verify the installer exists (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          $installer = Get-ChildItem build/bin -Filter *installer*.exe -ErrorAction SilentlyContinue
+          if (-not $installer) {
+            throw "No NSIS installer in build/bin - is makensis on PATH?"
+          }
+          "Built $($installer.Name) ($([math]::Round($installer.Length / 1MB, 1)) MB)"
 
       # ---- macOS: a universal .app, zipped so permissions survive ----
       - name: Build (macOS)
@@ -148,14 +171,30 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Not merge-multiple: keeping one directory per artifact means the
+      # platform is known from the path rather than guessed from a filename.
       - name: Collect the platform builds
         uses: actions/download-artifact@v8
         with:
-          path: dist
-          merge-multiple: true
+          path: artifacts
 
-      - name: List what will be published
-        run: ls -lR dist
+      # Give every asset a self-describing name. Wails names its output after
+      # the app, so the Linux binary arrives as a bare "Sablewright" and sits
+      # in the release next to "Sablewright.exe" telling you nothing about
+      # which platform it is for.
+      - name: Name the assets by platform
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          mkdir -p release
+          cp artifacts/Sablewright-Windows/Sablewright.exe     release/Sablewright-Windows.exe
+          cp artifacts/Sablewright-macOS/Sablewright-macOS.zip release/Sablewright-macOS.zip
+          cp artifacts/Sablewright-Linux/Sablewright           release/Sablewright-Linux
+          # Wails names the installer with the arch, so match it by pattern.
+          for f in artifacts/Sablewright-Windows/*installer*.exe; do
+            cp "$f" release/Sablewright-Windows-installer.exe
+          done
+          ls -l release
 
       # The tag is deleted and recreated on each merge so it always points at
       # the commit the binaries were actually built from. Marked prerelease:
@@ -166,7 +205,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           gh release delete latest --repo "$REPO" --yes --cleanup-tag || true
-          gh release create latest dist/* \
+          gh release create latest release/* \
             --repo "$REPO" \
             --target "$GITHUB_SHA" \
             --title "Latest build from main" \
