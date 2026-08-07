@@ -36,7 +36,7 @@ const state = {
   screen: "dashboard",
   models: { search: "", status: "All", sort: "Recent", selected: null },
   paints: { search: "", type: "All types", brand: "All brands",
-            range: "All ranges", owned: "All" },
+            range: "All ranges", stock: "All" },
   tips:   { search: "", category: "All" },
 };
 
@@ -345,6 +345,7 @@ async function renderDashboard() {
     [s.finished, "Finished", STATUS_COLORS["Complete"]],
     [s.sessions, s.minutes ? `Sessions · ${duration(s.minutes)}` : "Sessions logged", "#0ea5e9"],
     [s.paintsOwned, "Paints owned", "#8b5cf6"],
+    [s.paintsWishlist, "On wishlist", "#c07b1f"],
   ].map(([n, l, c]) => `
     <div class="card stat">
       <div class="bar" style="background:${c}"></div>
@@ -592,7 +593,7 @@ async function renderPaints() {
   if (!facets.ranges.includes(f.range)) f.range = "All ranges";
 
   const page = await call(App().ListPaints, { search: f.search, type: f.type,
-    brand: f.brand, range: f.range, owned: f.owned, limit: ROW_LIMIT });
+    brand: f.brand, range: f.range, stock: f.stock, limit: ROW_LIMIT });
   const shown = page.rows;
 
   const body = page.total ? shown.map(p => `
@@ -604,7 +605,8 @@ async function renderPaints() {
         p.range ? `<span class="range">${esc(p.range)}</span>` : ""}</span>
       <span><span class="tag">${esc(p.type)}</span></span>
       <span class="r" style="color:var(--muted)">${p.usedOn ? plural(p.usedOn, "mini", "minis") : "—"}</span>
-      <span class="r ${p.owned ? "yes" : "unowned"}">${p.owned ? "✓ Yes" : "☆ No"}</span>
+      <span class="r ${p.owned ? "yes" : "unowned"}">${p.owned ? "✓ Yes" : "☆ No"}${
+        p.wishlist ? `<span class="want">★ Wanted</span>` : ""}</span>
     </div>`).join("") + (page.total > shown.length
       ? `<div class="empty">Showing the first ${shown.length} of ${page.total}.
            Search or narrow the filters to see the rest.</div>` : "")
@@ -619,6 +621,7 @@ async function renderPaints() {
     <div class="page-head">
       <div><h1>Paint Inventory</h1>
         <div class="sub">${plural(facets.total, "paint")} listed · ${facets.owned} owned${
+          facets.wishlist ? ` · ${facets.wishlist} wanted` : ""}${
           page.total !== facets.total ? ` — ${page.total} match` : ""}</div></div>
       <div class="spacer"></div>
       <button class="btn" id="add-paint">+&nbsp; Add Paint</button>
@@ -628,7 +631,7 @@ async function renderPaints() {
       ${selectBox("p-brand", ["All brands", ...facets.brands], f.brand)}
       ${selectBox("p-range", ["All ranges", ...facets.ranges], f.range)}
       ${selectBox("p-type", ["All types", ...PAINT_TYPES], f.type)}
-      ${selectBox("p-owned", ["All", "Owned only", "Not owned"], f.owned)}
+      ${selectBox("p-stock", ["All", "Owned only", "Not owned", "On wishlist"], f.stock)}
     </div>
     <div class="card ptable">
       <div class="thead"><span></span><span>NAME</span><span>BRAND</span>
@@ -642,7 +645,7 @@ async function renderPaints() {
   $("#p-type").onchange = e => { f.type = e.target.value; renderPaints(); };
   $("#p-brand").onchange = e => { f.brand = e.target.value; renderPaints(); };
   $("#p-range").onchange = e => { f.range = e.target.value; renderPaints(); };
-  $("#p-owned").onchange = e => { f.owned = e.target.value; renderPaints(); };
+  $("#p-stock").onchange = e => { f.stock = e.target.value; renderPaints(); };
   $("#add-paint").onclick = () => paintDialog(null);
 
   const restore = $("#restore-lib");
@@ -1045,7 +1048,7 @@ async function paintDialog(paint) {
   const isNew = !paint;
   const p = paint ? { ...paint } : {
     id: 0, name: "", brand: "", range: "", code: "", type: "Base",
-    hex: "#888888", owned: true, notes: "",
+    hex: "#888888", owned: true, wishlist: false, notes: "",
   };
   // suggestions = brands already in the collection, plus the common ones,
   // but the field is free text so any brand can simply be typed in
@@ -1054,6 +1057,10 @@ async function paintDialog(paint) {
     a.toLowerCase().localeCompare(b.toLowerCase()));
   const ranges = facets.ranges;
 
+  // Every field below carries a -f suffix. The inventory screen behind the
+  // dialog stays in the document and owns the plain names for its own filter
+  // bar, and it comes first, so an id shared with a filter resolves to the
+  // filter and the field the user actually typed into is never read.
   openModal(`
     <header><h2>${isNew ? "Add Paint" : "Edit Paint"}</h2><button class="close">✕</button></header>
     <div class="mbody">
@@ -1085,8 +1092,10 @@ async function paintDialog(paint) {
           <input type="color" id="p-color" value="${esc(p.hex)}">
           <input type="text" id="p-hex" value="${esc(p.hex)}" spellcheck="false">
         </div></div>
-      <label class="check"><input type="checkbox" id="p-owned"${p.owned ? " checked" : ""}>
-        I own this paint (untick and it stays listed as one you don't)</label>
+      <label class="check"><input type="checkbox" id="p-owned-f"${p.owned ? " checked" : ""}>
+        Owned</label>
+      <label class="check"><input type="checkbox" id="p-wish-f"${p.wishlist ? " checked" : ""}>
+        Wishlist</label>
       ${!isNew ? `<div style="color:var(--muted);font-size:13px;margin-top:14px">
         Used on ${plural(paint.usedOn || 0, "mini", "minis")}.</div>` : ""}
     </div>
@@ -1104,7 +1113,7 @@ async function paintDialog(paint) {
 
   $("#p-cancel").onclick = closeModal;
   $("#p-save").onclick = async () => {
-    await call(App().SavePaint, {
+    const saved = await call(App().SavePaint, {
       ...p,
       name: $("#p-name").value.trim(),
       brand: $("#p-brand-f").value.trim(),
@@ -1112,8 +1121,18 @@ async function paintDialog(paint) {
       code: $("#p-code-f").value.trim(),
       type: $("#p-type-f").value,
       hex: hex.value.trim(),
-      owned: $("#p-owned").checked,
+      owned: $("#p-owned-f").checked,
+      wishlist: $("#p-wish-f").checked,
     });
+    // The rack runs to well over a thousand paints and the table draws the
+    // first few hundred, ordered by brand, so one just added lands off the end
+    // of the list and reads as a paint that never saved. Point the screen at
+    // it: the filters that could hide it come off and the search box, which is
+    // on screen and says what it's doing, narrows to the new paint.
+    if (isNew) {
+      Object.assign(state.paints, { search: saved.name, type: "All types",
+        brand: "All brands", range: "All ranges", stock: "All" });
+    }
     closeModal(); renderPaints(); toast("Saved");
   };
   const del = $("#p-del");

@@ -74,7 +74,10 @@ type Paint struct {
 	Type  string `json:"type"`
 	Hex   string `json:"hex"`
 	Owned bool   `json:"owned"`
-	Notes string `json:"notes"`
+	// Wishlist marks a paint to buy. It's deliberately independent of Owned:
+	// a pot you have but have nearly used up belongs on the shopping list too.
+	Wishlist bool   `json:"wishlist"`
+	Notes    string `json:"notes"`
 }
 
 type Tip struct {
@@ -526,7 +529,10 @@ func (s *Store) DeleteSession(modelID, sessionID int) (Model, error) {
 // Paints
 // ---------------------------------------------------------------------------
 
-func (s *Store) Paints(search, ptype, brand, rng, owned string) []Paint {
+// Paints filters the rack. stock is the stock-status filter and covers both
+// what's on the shelf and what's on the shopping list, since the screen offers
+// them from one dropdown.
+func (s *Store) Paints(search, ptype, brand, rng, stock string) []Paint {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	search = strings.ToLower(strings.TrimSpace(search))
@@ -541,10 +547,13 @@ func (s *Store) Paints(search, ptype, brand, rng, owned string) []Paint {
 		if rng != "" && rng != "All ranges" && p.Range != rng {
 			continue
 		}
-		if owned == "Owned only" && !p.Owned {
+		if stock == "Owned only" && !p.Owned {
 			continue
 		}
-		if owned == "Not owned" && p.Owned {
+		if stock == "Not owned" && p.Owned {
+			continue
+		}
+		if stock == "On wishlist" && !p.Wishlist {
 			continue
 		}
 		// the code is worth searching: it's how AK and Ionic pots are labelled
@@ -563,16 +572,20 @@ func (s *Store) Paints(search, ptype, brand, rng, owned string) []Paint {
 	return out
 }
 
-// PaintCounts returns how many paints are in the rack and how many are owned.
-func (s *Store) PaintCounts() (total, owned int) {
+// PaintCounts returns how many paints are in the rack, how many are owned, and
+// how many are on the wishlist.
+func (s *Store) PaintCounts() (total, owned, wishlist int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, p := range s.data.Paints {
 		if p.Owned {
 			owned++
 		}
+		if p.Wishlist {
+			wishlist++
+		}
 	}
-	return len(s.data.Paints), owned
+	return len(s.data.Paints), owned, wishlist
 }
 
 // Ranges lists the product lines on offer, narrowed to one brand when given.
@@ -772,6 +785,7 @@ type LogEntry struct {
 type Stats struct {
 	Models     int            `json:"models"`
 	PaintsOwn  int            `json:"paintsOwned"`
+	PaintsWish int            `json:"paintsWishlist"`
 	Tips       int            `json:"tips"`
 	InProg     int            `json:"inProgress"`
 	Finished   int            `json:"finished"`
@@ -818,6 +832,9 @@ func (s *Store) Stats() Stats {
 	for _, p := range s.data.Paints {
 		if p.Owned {
 			st.PaintsOwn++
+		}
+		if p.Wishlist {
+			st.PaintsWish++
 		}
 	}
 	st.Tips = len(s.data.Tips)
