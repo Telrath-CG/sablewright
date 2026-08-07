@@ -44,6 +44,38 @@ const state = {
 const $ = (sel, root = document) => root.querySelector(sel);
 const content = () => $("#content");
 
+// A screen re-renders by replacing the whole of #content, which throws away
+// the very node the user is typing into. The search boxes re-render mid-word
+// off a debounce, so without this the caret drops back to <body> after the
+// first pause and the rest of what you type goes nowhere.
+//
+// The live value wins over the rendered one. The markup is built from filter
+// state read *before* an await on the backend, so anything typed during that
+// await is newer than the HTML and would otherwise be silently overwritten.
+// The pending debounce still closes over the old, now-detached input, and
+// reading .value off a detached node works, so the follow-up render
+// reconciles the list with whatever ended up in the box.
+function setContent(html) {
+  const prev = document.activeElement;
+  const id = prev ? prev.id : "";
+  let sel = null;
+  try {
+    if (prev && typeof prev.selectionStart === "number") {
+      sel = { value: prev.value, start: prev.selectionStart, end: prev.selectionEnd };
+    }
+  } catch (_) { /* input types that don't support selection throw on read */ }
+
+  content().innerHTML = html;
+
+  if (!id) return;
+  const next = document.getElementById(id);
+  if (!next) return;
+  next.focus();
+  if (!sel) return;
+  if (next.value !== sel.value) next.value = sel.value;
+  try { next.setSelectionRange(sel.start, sel.end); } catch (_) { /* ditto */ }
+}
+
 function esc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g,
     c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -222,7 +254,7 @@ async function renderDashboard() {
         <span class="date">${m.completed ? prettyDate(m.completed) : ""}</span></div>`).join("")
     : `<div class="empty">No finished minis yet — they'll show up here.</div>`;
 
-  content().innerHTML = `
+  setContent(`
     <div class="page-head"><div>
       <h1>Dashboard</h1><div class="sub">At a glance — your painting progress</div>
     </div></div>
@@ -240,7 +272,7 @@ async function renderDashboard() {
     <div class="card" style="margin-top:16px">
       <h2>Latest painting sessions</h2><div class="divider"></div>
       <div style="padding:6px 0 10px">${logs}</div>
-    </div>`;
+    </div>`);
 
   content().querySelectorAll(".log-jump").forEach(el => {
     el.onclick = () => {
@@ -271,7 +303,7 @@ async function renderModels() {
     </div>`).join("")
     : `<div class="empty"><strong>No minis yet.</strong>Click “+ Add Mini” to start your collection.</div>`;
 
-  content().innerHTML = `
+  setContent(`
     <div class="page-head">
       <div><h1>Models</h1><div class="sub">Your collection — ${plural(models.length, "mini")}</div></div>
       <div class="spacer"></div>
@@ -289,7 +321,7 @@ async function renderModels() {
         <div class="rows" id="m-rows">${rows}</div>
       </div>
       <div class="card detail-pane" id="m-detail"></div>
-    </div>`;
+    </div>`);
 
   const search = $("#m-search");
   search.oninput = debounce(() => { f.search = search.value; renderModels(); }, 180);
@@ -432,7 +464,7 @@ async function renderPaints() {
              <div style="margin-top:12px"><button class="btn ghost" id="restore-lib">
                Restore built-in paints</button></div></div>`);
 
-  content().innerHTML = `
+  setContent(`
     <div class="page-head">
       <div><h1>Paint Inventory</h1>
         <div class="sub">${plural(facets.total, "paint")} listed · ${facets.owned} owned${
@@ -452,7 +484,7 @@ async function renderPaints() {
         <span>TYPE</span><span class="r">USED ON</span><span class="r">IN STOCK</span></div>
       <div class="divider"></div>
       <div>${body}</div>
-    </div>`;
+    </div>`);
 
   const search = $("#p-search");
   search.oninput = debounce(() => { f.search = search.value; renderPaints(); }, 180);
@@ -498,7 +530,7 @@ async function renderTips() {
     : `<div class="card"><div class="empty"><strong>No notes yet.</strong>
          Save your recipes here so you can find them again.</div></div>`;
 
-  content().innerHTML = `
+  setContent(`
     <div class="page-head">
       <div><h1>Technique Notes</h1>
         <div class="sub">Your painting recipes &amp; methods — searchable</div></div>
@@ -509,7 +541,7 @@ async function renderTips() {
       ${searchBox("t-search", "Search notes, tags, recipes…", f.search)}
       ${selectBox("t-cat", ["All", ...TIP_CATEGORIES], f.category)}
     </div>
-    ${cards}`;
+    ${cards}`);
 
   const search = $("#t-search");
   search.oninput = debounce(() => { f.search = search.value; renderTips(); }, 180);
