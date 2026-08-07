@@ -17,6 +17,7 @@ that tag is always the current build of `main`:
 | Windows | `Sablewright-Windows.exe`, or `Sablewright-Windows-installer.exe` to install it properly |
 | macOS | `Sablewright-macOS.dmg` — **Apple Silicon only** |
 | Debian, Ubuntu | `sablewright_<version>_amd64.deb` |
+| Fedora, RHEL, openSUSE | `sablewright-<version>-1.x86_64.rpm` |
 | Arch | `sablewright-<version>-1-x86_64.pkg.tar.zst` |
 | Other Linux | `Sablewright-Linux`, a bare binary |
 
@@ -35,12 +36,18 @@ file to keep track of:
 
 ```
 sudo apt install ./sablewright_1.1.0_amd64.deb
+sudo dnf install ./sablewright-1.1.0-1.x86_64.rpm
 sudo pacman -U sablewright-1.1.0-1-x86_64.pkg.tar.zst
 ```
 
-Both depend on GTK 3 and WebKit2GTK 4.1, which current distributions ship as
-standard. The bare binary is for everything else, and arrives without the
-executable bit: `chmod +x Sablewright-Linux`.
+All three depend on GTK 3 and WebKit2GTK 4.1, which current distributions ship
+as standard, and the package manager will say so plainly if either is absent.
+
+The bare binary is the fallback for distributions none of those cover, and for
+running the app without installing it. It declares no dependencies, so a
+missing library surfaces as a linker error rather than a readable message —
+prefer a package wherever one fits. It also arrives without the executable
+bit: `chmod +x Sablewright-Linux`.
 
 ---
 
@@ -202,17 +209,24 @@ wails build -platform darwin/arm64 -ldflags "-w -s"
 `build-mac-or-linux.sh` runs the same build and produces the `.dmg` alongside
 the `.app` whenever create-dmg is installed, and just the `.app` when it isn't.
 
-The Linux `.deb` and Arch packages come from
-[nfpm](https://github.com/goreleaser/nfpm), which wraps the finished binary —
-one config in `build/linux/nfpm.yaml` covering both formats, with no root and
-no containers involved:
+The Linux packages come from [nfpm](https://github.com/goreleaser/nfpm), which
+wraps the finished binary — one config in `build/linux/nfpm.yaml` covering all
+three formats, with no root and no containers involved:
 
 ```
 go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
 export VERSION=1.1.0
 nfpm pkg -f build/linux/nfpm.yaml --packager deb       --target build/bin/
+nfpm pkg -f build/linux/nfpm.yaml --packager rpm       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager archlinux --target build/bin/
 ```
+
+The dependency lists differ per format in ways worth knowing about. The `.deb`
+spells out `libgtk-3-0 | libgtk-3-0t64`, because Ubuntu 24.04's 64-bit `time_t`
+transition renamed that package. The `.rpm` requires sonames rather than
+package names, since Fedora and openSUSE disagree on what to call WebKit while
+providing the same soname. Only the `.deb` and `.rpm` carry a glibc floor;
+Arch is rolling, so its glibc is never older than the build's.
 
 ### Version numbers
 
