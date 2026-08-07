@@ -1,0 +1,56 @@
+# Package definition for the Linux .deb and Arch builds.
+#
+# Wails v2 has no packaging target of its own, so nfpm wraps the binary it
+# already produced: one config, both formats, no root and no containers.
+#
+# ${VERSION} is exported by the build workflow, which reads it out of
+# wails.json - the same number the app reports through App.Version - so a
+# package can never claim a version the binary inside it disagrees with.
+name: sablewright
+arch: amd64
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: utils
+priority: optional
+maintainer: Telrath
+homepage: https://github.com/Telrath-CG/sablewright
+description: |
+  Track your miniature painting projects.
+  Records what stage each miniature is at, the paints used, a dated log of
+  every painting session, technique recipes and progress photos. Everything is
+  stored locally as JSON; the app makes no network connections.
+
+contents:
+  - src: ./build/bin/Sablewright
+    dst: /usr/bin/sablewright
+    file_info:
+      mode: 0755
+
+  # Without a desktop entry the app installs but never appears in the
+  # application menu, leaving a binary only reachable from a terminal.
+  - src: ./build/linux/sablewright.desktop
+    dst: /usr/share/applications/sablewright.desktop
+
+  # The SVG is the one that scales to whatever size a desktop asks for.
+  # appicon.png is 1024px, which hicolor has no bucket for, so it goes to the
+  # legacy pixmaps directory - still consulted by desktops that pass over
+  # scalable icons, and free to be any size.
+  - src: ./build/icon.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/sablewright.svg
+  - src: ./build/appicon.png
+    dst: /usr/share/pixmaps/sablewright.png
+
+overrides:
+  deb:
+    depends:
+      # Ubuntu 24.04's 64-bit time_t transition renamed libgtk-3-0 to
+      # libgtk-3-0t64. The replacement does declare Provides: libgtk-3-0, but
+      # spelling the alternative out says so plainly rather than depending on
+      # a reader knowing that.
+      - libgtk-3-0 | libgtk-3-0t64
+      - libwebkit2gtk-4.1-0
+  archlinux:
+    depends:
+      - gtk3
+      - webkit2gtk-4.1

@@ -40,19 +40,21 @@ jobs:
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Download Go dependencies
         run: go mod download
 
+      # The tag has to match the one the build job uses, or this checks a
+      # different WebKit binding than the one that actually ships.
       - name: Build
-        run: go build ./...
+        run: go build -tags webkit2_41 ./...
 
       - name: Vet
-        run: go vet ./...
+        run: go vet -tags webkit2_41 ./...
 
       - name: Test
-        run: go test ./...
+        run: go test -tags webkit2_41 ./...
 
   build:
     name: ${{ matrix.label }}
@@ -81,16 +83,36 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      # Wails needs GTK and WebKit headers to compile on Linux. Ubuntu 22.04
-      # ships webkit2gtk-4.0; 24.04 only has 4.1 and needs the webkit2_41 tag.
+      # Wails needs GTK and WebKit headers to compile on Linux. Ubuntu 22.04 is
+      # still the runner because its glibc is the oldest of the images, and a
+      # binary linked against an older glibc runs on newer systems but never
+      # the other way round. WebKit is taken at 4.1 rather than the 4.0 that
+      # 22.04 defaults to: 24.04 and Debian 13 dropped 4.0 entirely and Arch
+      # only ever had 4.1, so a package built against 4.0 would be
+      # uninstallable on most current systems.
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+
+      # One version number for everything. Wails already reads productVersion
+      # out of wails.json for the Windows file properties, so making it the
+      # source for the in-app version and the Linux packages too means one
+      # place to bump instead of four that drift. The commit rides along
+      # because every merge replaces the same rolling release: the number
+      # alone cannot tell two downloads apart.
+      - name: Work out the build version
+        shell: bash
+        run: |
+          V="$(sed -n 's/.*"productVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' wails.json | head -1)"
+          [ -n "$V" ] || { echo "No productVersion found in wails.json"; exit 1; }
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-w -s -X main.version=$V -X main.commit=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+          echo "Building $V (${GITHUB_SHA:0:7})"
 
       # Download, don't tidy: go.mod and go.sum are committed, so CI fetches
       # exactly the pinned versions and verifies them against the checksums
@@ -101,7 +123,7 @@ jobs:
       # ---- Windows: a single .exe, plus an NSIS installer ----
       - name: Build (Windows)
         if: runner.os == 'Windows'
-        run: wails build -platform windows/amd64 -webview2 embed -ldflags "-w -s"
+        run: wails build -platform windows/amd64 -webview2 embed -ldflags "${{ env.LDFLAGS }}"
 
       # windows-latest is Windows Server 2025, and that image dropped the NSIS
       # that windows-2022 shipped, so makensis has to be installed explicitly.
@@ -116,7 +138,7 @@ jobs:
 
       - name: Build installer (Windows)
         if: runner.os == 'Windows'
-        run: wails build -platform windows/amd64 -webview2 embed -nsis -ldflags "-w -s"
+        run: wails build -platform windows/amd64 -webview2 embed -nsis -ldflags "${{ env.LDFLAGS }}"
 
       # Wails only *warns* when makensis is missing, so the step above exits 0
       # having produced nothing. That is exactly how a silently-broken
@@ -131,22 +153,100 @@ jobs:
           }
           "Built $($installer.Name) ($([math]::Round($installer.Length / 1MB, 1)) MB)"
 
-      # ---- macOS: a universal .app, zipped so permissions survive ----
+      # ---- macOS: an Apple Silicon .app in a drag-to-install DMG ----
+      #
+      # arm64 rather than universal: Apple Silicon is the only configuration
+      # this app is supported on, and a single slice halves the download.
+      # The runner is already arm64, so this is a native build.
       - name: Build (macOS)
         if: runner.os == 'macOS'
-        run: wails build -platform darwin/universal -ldflags "-w -s"
+        run: wails build -platform darwin/arm64 -ldflags "${{ env.LDFLAGS }}"
 
-      - name: Zip the .app (macOS)
+      - name: Install create-dmg (macOS)
+        if: runner.os == 'macOS'
+        run: brew install create-dmg
+
+      - name: Build the DMG (macOS)
         if: runner.os == 'macOS'
         run: |
-          cd build/bin
-          ditto -c -k --keepParent "Sablewright.app" Sablewright-macOS.zip || \
-          ditto -c -k --keepParent Sablewright.app Sablewright-macOS.zip
+          set -uo pipefail
+          APP=build/bin/Sablewright.app
+          DMG=build/bin/Sablewright-macOS.dmg
 
-      # ---- Linux ----
+          # create-dmg images the *contents* of the folder it is given, so the
+          # .app goes into a staging directory of its own rather than being
+          # passed directly - otherwise the bundle is unwrapped into the image.
+          # ditto rather than cp: it preserves the bundle's permissions and
+          # extended attributes, which is what makes the app launchable.
+          STAGE="$(mktemp -d)"
+          ditto "$APP" "$STAGE/Sablewright.app"
+
+          # Wails compiles build/appicon.png into the bundle; reuse the result
+          # as the volume icon so the mounted disk isn't a blank drive.
+          #
+          # --volname leads the array so it is never empty: macOS ships bash
+          # 3.2, where expanding an empty array trips `set -u`.
+          # The `|| true` is load-bearing: with an unmatched glob ls exits 1,
+          # pipefail carries that to the assignment, and the step's `bash -e`
+          # would abort the build over a missing volume icon.
+          OPTS=(--volname Sablewright)
+          ICNS="$(ls "$APP"/Contents/Resources/*.icns 2>/dev/null | head -1 || true)"
+          [ -n "$ICNS" ] && OPTS+=(--volicon "$ICNS")
+          OPTS+=(--window-pos 200 120 --window-size 600 400 --icon-size 110
+                 --icon Sablewright.app 150 190
+                 --hide-extension Sablewright.app
+                 --app-drop-link 450 190)
+
+          # create-dmg lays the window out by driving the Finder over
+          # AppleScript, which intermittently loses a race against the volume
+          # it just mounted on a CI runner. That is flaky rather than broken,
+          # so retry once before treating it as a real failure.
+          for attempt in 1 2; do
+            rm -f "$DMG"
+            create-dmg "${OPTS[@]}" "$DMG" "$STAGE" && break
+            echo "create-dmg attempt $attempt failed"
+          done
+
+          # Assert on the file rather than the exit code, for the same reason
+          # the NSIS step above does.
+          [ -f "$DMG" ] || { echo "No DMG in build/bin - create-dmg failed twice."; exit 1; }
+          ls -lh "$DMG"
+
+      # ---- Linux: a bare binary, plus .deb and Arch packages ----
       - name: Build (Linux)
         if: runner.os == 'Linux'
-        run: wails build -platform linux/amd64 -ldflags "-w -s"
+        run: wails build -platform linux/amd64 -tags webkit2_41 -ldflags "${{ env.LDFLAGS }}"
+
+      # nfpm builds both package formats from one config without root or a
+      # container, and `go install` is the cheapest way to get it given Go is
+      # already set up above. Pinned rather than @latest so a release upstream
+      # can't change what this produces.
+      - name: Install nfpm
+        if: runner.os == 'Linux'
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
+
+      - name: Package for Debian and Arch (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          nfpm pkg -f build/linux/nfpm.yaml --packager deb       --target build/bin/
+          nfpm pkg -f build/linux/nfpm.yaml --packager archlinux --target build/bin/
+
+      # Same reasoning as the NSIS check: assert on the files rather than
+      # trusting an exit code, so a packaging step that quietly produces
+      # nothing fails here instead of shipping an incomplete release.
+      - name: Verify the packages exist (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          shopt -s nullglob
+          deb=(build/bin/*.deb); arch=(build/bin/*.pkg.tar.zst)
+          [ ${#deb[@]} -gt 0 ]  || { echo "nfpm produced no .deb";  exit 1; }
+          [ ${#arch[@]} -gt 0 ] || { echo "nfpm produced no Arch package"; exit 1; }
+          ls -lh "${deb[@]}" "${arch[@]}"
+
+          # A .deb whose dependencies don't resolve installs nowhere, and that
+          # is invisible until someone tries. dpkg can at least confirm the
+          # control file parses and says what it should.
+          dpkg-deb --info "${deb[0]}"
 
       - name: Upload build
         uses: actions/upload-artifact@v7
@@ -154,7 +254,9 @@ jobs:
           name: ${{ matrix.artifact }}
           path: |
             build/bin/*.exe
-            build/bin/*.zip
+            build/bin/*.dmg
+            build/bin/*.deb
+            build/bin/*.pkg.tar.zst
             build/bin/Sablewright
           if-no-files-found: warn
           # These are now just a hand-off to the release job, which keeps the
@@ -191,11 +293,18 @@ jobs:
           shopt -s nullglob
           mkdir -p release
           cp artifacts/Sablewright-Windows/Sablewright.exe     release/Sablewright-Windows.exe
-          cp artifacts/Sablewright-macOS/Sablewright-macOS.zip release/Sablewright-macOS.zip
+          cp artifacts/Sablewright-macOS/Sablewright-macOS.dmg release/Sablewright-macOS.dmg
           cp artifacts/Sablewright-Linux/Sablewright           release/Sablewright-Linux
           # Wails names the installer with the arch, so match it by pattern.
           for f in artifacts/Sablewright-Windows/*installer*.exe; do
             cp "$f" release/Sablewright-Windows-installer.exe
+          done
+          # The Linux packages keep the names nfpm gave them. Those already
+          # carry the version and architecture in the form each ecosystem
+          # expects, and renaming them to match the pattern above would only
+          # make them look wrong to the tools that consume them.
+          for f in artifacts/Sablewright-Linux/*.deb artifacts/Sablewright-Linux/*.pkg.tar.zst; do
+            cp "$f" release/
           done
           ls -l release
 
