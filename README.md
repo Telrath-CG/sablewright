@@ -15,13 +15,32 @@ that tag is always the current build of `main`:
 | Platform | Download |
 | --- | --- |
 | Windows | `Sablewright-Windows.exe`, or `Sablewright-Windows-installer.exe` to install it properly |
-| macOS | `Sablewright-macOS.zip` |
-| Linux | `Sablewright-Linux` |
+| macOS | `Sablewright-macOS.dmg` — **Apple Silicon only** |
+| Debian, Ubuntu | `sablewright_<version>_amd64.deb` |
+| Arch | `sablewright-<version>-1-x86_64.pkg.tar.zst` |
+| Other Linux | `Sablewright-Linux`, a bare binary |
 
-Two things the downloads need on first run. On macOS the app isn't signed or
-notarised, so Gatekeeper refuses it on a double-click — right-click the app and
-choose *Open*, which offers to run it anyway. On Linux the binary arrives
-without the executable bit: `chmod +x Sablewright-Linux`.
+**macOS** supports Apple Silicon (M1 and later) and nothing else. No Intel
+build is produced, and the one inside the disk image will not run on an Intel
+Mac. The app isn't signed or notarized either, so Gatekeeper blocks the first
+launch: open the disk image, drag Sablewright into the Applications folder
+beside it, and start it once. macOS refuses and offers only *Done* — go to
+*System Settings → Privacy & Security*, scroll to the bottom, and click *Open
+Anyway*. (Older instructions say to right-click and choose *Open* instead;
+macOS 15 removed that shortcut for unsigned apps.)
+
+**Linux** is better served by the packages than the bare binary where one
+fits — they install to `/usr/bin` and add a menu entry, rather than leaving a
+file to keep track of:
+
+```
+sudo apt install ./sablewright_1.1.0_amd64.deb
+sudo pacman -U sablewright-1.1.0-1-x86_64.pkg.tar.zst
+```
+
+Both depend on GTK 3 and WebKit2GTK 4.1, which current distributions ship as
+standard. The bare binary is for everything else, and arrives without the
+executable bit: `chmod +x Sablewright-Linux`.
 
 ---
 
@@ -138,12 +157,17 @@ brew install go
 Debian and Ubuntu:
 
 ```
-sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.0-dev
+sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
 ```
 
-Ubuntu 24.04 and newer ship WebKit2GTK **4.1** rather than 4.0. There you want
-`libwebkit2gtk-4.1-dev` instead, and the build needs `-tags webkit2_41`. CI
-pins `ubuntu-22.04` precisely to stay on the 4.0 side of that split.
+WebKit2GTK comes in a 4.0 and a 4.1 flavor and they are not interchangeable:
+building against 4.1 needs `-tags webkit2_41`. Releases target 4.1, because
+4.0 is gone from Ubuntu 24.04, Debian 13 and Arch, and a package built against
+it would be uninstallable on most current systems.
+`build-mac-or-linux.sh` detects which of the two you have and picks the tag to
+match. CI still runs on `ubuntu-22.04` — for its older glibc, which is what
+lets one binary run on old distributions as well as new — but installs the 4.1
+headers there rather than the 4.0 that image defaults to.
 
 **Windows** — nothing beyond Go. The WebView2 runtime ships with Windows 11 and
 is embedded into the binary at build time regardless. Building the *installer*
@@ -165,3 +189,45 @@ The Windows installer is a separate invocation:
 ```
 wails build -platform windows/amd64 -webview2 embed -nsis
 ```
+
+The macOS release is an Apple Silicon build wrapped in a disk image. Wails v2
+has no packaging target for that, so CI hands the finished bundle to
+[create-dmg](https://github.com/create-dmg/create-dmg):
+
+```
+brew install create-dmg
+wails build -platform darwin/arm64 -ldflags "-w -s"
+```
+
+`build-mac-or-linux.sh` runs the same build and produces the `.dmg` alongside
+the `.app` whenever create-dmg is installed, and just the `.app` when it isn't.
+
+The Linux `.deb` and Arch packages come from
+[nfpm](https://github.com/goreleaser/nfpm), which wraps the finished binary —
+one config in `build/linux/nfpm.yaml` covering both formats, with no root and
+no containers involved:
+
+```
+go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
+export VERSION=1.1.0
+nfpm pkg -f build/linux/nfpm.yaml --packager deb       --target build/bin/
+nfpm pkg -f build/linux/nfpm.yaml --packager archlinux --target build/bin/
+```
+
+### Version numbers
+
+`productVersion` in `wails.json` is the only place the version is written
+down. Wails already reads it there for the Windows file properties; the build
+scripts read the same field and hand it to the linker along with the short
+commit hash:
+
+```
+-ldflags "-w -s -X main.version=1.1.0 -X main.commit=73ec59c"
+```
+
+The sidebar shows whatever was stamped in, which is why it reports the commit
+as well as the number: every merge to `main` replaces the same rolling
+release, so two downloads a week apart both call themselves the same version
+and only the hash says which one a bug report is about. A build with nothing
+stamped in says `dev` — that's `wails dev` and a plain `go build`. Releasing a
+new version means editing `wails.json` and nothing else.

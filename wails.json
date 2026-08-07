@@ -7,12 +7,12 @@
   "frontend:dev:watcher": "",
   "frontend:dev:serverUrl": "",
   "author": {
-    "name": "CJ"
+    "name": "Telrath"
   },
   "info": {
     "companyName": "Sablewright",
     "productName": "Sablewright",
-    "productVersion": "1.0.0",
+    "productVersion": "1.1.0",
     "copyright": "",
     "comments": "Track your miniature painting projects: progress, paints used and technique notes."
   }

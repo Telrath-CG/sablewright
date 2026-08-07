@@ -1208,6 +1208,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   initTheme();
   await ready();
   initNav();
+  // The build names itself rather than carrying a string the source has to
+  // remember to update - the linker stamps it in, so it can't go stale.
+  App().Version().then(v => { $("#version").textContent = v; });
   const warn = await App().StartupError();
   if (warn) toast(warn);
   show("dashboard");

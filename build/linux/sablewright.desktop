@@ -1,0 +1,16 @@
+[Desktop Entry]
+# Version is the desktop-entry spec revision, not the app's - the app's
+# version comes from the binary itself.
+Version=1.0
+Type=Application
+Name=Sablewright
+GenericName=Miniature painting tracker
+Comment=Track your miniature painting projects
+Exec=sablewright
+Icon=sablewright
+Terminal=false
+Categories=Graphics;2DGraphics;Utility;
+Keywords=miniature;painting;wargaming;hobby;paint;warhammer;
+# Matches the ProgramName set in main.go's linux.Options, which is what makes
+# the running window attach to this launcher rather than a generic icon.
+StartupWMClass=Sablewright
