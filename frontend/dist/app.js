@@ -374,7 +374,7 @@ async function renderModelDetail(id) {
       </div>
       <div class="section">PHOTOS</div><div class="photos">${photos}</div>
       <div class="section">PAINTS USED</div>${chips}
-      <div class="section">TECHNIQUE NOTES</div>${noteHtml}
+      <div class="section">NOTES</div>${noteHtml}
       <div class="section">PAINTING LOG${
         sessions.length ? ` · ${plural(sessions.length, "session")}${
           totalMins ? ` · ${duration(totalMins)}` : ""}` : ""}</div>${logHtml}
@@ -577,7 +577,7 @@ async function modelDialog(model) {
       </div>
       <label class="check" style="margin-bottom:14px">
         <input type="checkbox" id="f-fav"${m.favorite ? " checked" : ""}> Favourite</label>
-      <div class="field"><label>Technique notes for this mini</label>
+      <div class="field"><label>Notes for this mini</label>
         <textarea id="f-notes" placeholder="One step per line…">${esc(m.notes)}</textarea></div>`;
 
     const paintsTab = allPaints.length ? `
