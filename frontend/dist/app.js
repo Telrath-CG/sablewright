@@ -44,36 +44,47 @@ const state = {
 const $ = (sel, root = document) => root.querySelector(sel);
 const content = () => $("#content");
 
-// A screen re-renders by replacing the whole of #content, which throws away
-// the very node the user is typing into. The search boxes re-render mid-word
-// off a debounce, so without this the caret drops back to <body> after the
-// first pause and the rest of what you type goes nowhere.
+// A screen or a modal re-renders by replacing a whole subtree, which throws
+// away the very node the user is typing into. The search boxes re-render
+// mid-word off a debounce, so without this the caret drops back to <body>
+// after the first pause and the rest of what you type goes nowhere.
 //
+// Only a field inside the subtree about to be replaced is worth restoring:
+// a modal opening over the models list must not yank focus back down to the
+// search box behind it, which is still perfectly focused where it is.
+function captureFocus(root) {
+  const el = document.activeElement;
+  if (!el || !el.id || !root.contains(el)) return null;
+  const snap = { id: el.id, sel: null };
+  try {
+    if (typeof el.selectionStart === "number") {
+      snap.sel = { value: el.value, start: el.selectionStart, end: el.selectionEnd };
+    }
+  } catch (_) { /* input types that don't support selection throw on read */ }
+  return snap;
+}
+
 // The live value wins over the rendered one. The markup is built from filter
 // state read *before* an await on the backend, so anything typed during that
 // await is newer than the HTML and would otherwise be silently overwritten.
 // The pending debounce still closes over the old, now-detached input, and
 // reading .value off a detached node works, so the follow-up render
 // reconciles the list with whatever ended up in the box.
-function setContent(html) {
-  const prev = document.activeElement;
-  const id = prev ? prev.id : "";
-  let sel = null;
-  try {
-    if (prev && typeof prev.selectionStart === "number") {
-      sel = { value: prev.value, start: prev.selectionStart, end: prev.selectionEnd };
-    }
-  } catch (_) { /* input types that don't support selection throw on read */ }
-
-  content().innerHTML = html;
-
-  if (!id) return;
-  const next = document.getElementById(id);
+function restoreFocus(snap) {
+  if (!snap) return;
+  const next = document.getElementById(snap.id);
   if (!next) return;
   next.focus();
+  const sel = snap.sel;
   if (!sel) return;
   if (next.value !== sel.value) next.value = sel.value;
   try { next.setSelectionRange(sel.start, sel.end); } catch (_) { /* ditto */ }
+}
+
+function setContent(html) {
+  const snap = captureFocus(content());
+  content().innerHTML = html;
+  restoreFocus(snap);
 }
 
 function esc(s) {
@@ -554,8 +565,13 @@ async function renderTips() {
 
 /* =================================================================== MODALS */
 function openModal(html) {
-  $("#modal").innerHTML = html;
+  const modal = $("#modal");
+  // A modal re-renders in place - a tab switch, or the paint picker filtering
+  // as you type - so the caret needs the same treatment the screens get.
+  const snap = captureFocus(modal);
+  modal.innerHTML = html;
   $("#modal-backdrop").hidden = false;
+  restoreFocus(snap);
   const close = $("#modal .close");
   if (close) close.onclick = closeModal;
   document.addEventListener("keydown", escClose);
@@ -577,8 +593,13 @@ async function modelDialog(model) {
   };
   let tab = "details";
   let paintSearch = "";
+  let paintBrand = "All brands";
   let editSession = {};   // the log entry currently being edited, {} = new
   const allPaints = await call(App().AllPaints);
+  // The whole rack is already in hand, so the brand list comes off it rather
+  // than out of a second trip to the backend.
+  const pickerBrands = [...new Set(allPaints.map(p => p.brand).filter(Boolean))]
+    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
   function render() {
     const chosen = new Set(m.paintIds || []);
@@ -586,6 +607,7 @@ async function modelDialog(model) {
     // The rack holds the whole catalogue, so float the paints that are
     // actually on the desk — owned, or already ticked — to the top.
     const matched = allPaints
+      .filter(p => paintBrand === "All brands" || p.brand === paintBrand)
       .filter(p => !q || (p.name + " " + p.brand + " " + p.range + " " + p.code)
         .toLowerCase().includes(q))
       .sort((a, b) => (chosen.has(b.id) - chosen.has(a.id)) || (b.owned - a.owned));
@@ -613,12 +635,17 @@ async function modelDialog(model) {
         <textarea id="f-notes" placeholder="One step per line…">${esc(m.notes)}</textarea></div>`;
 
     const paintsTab = allPaints.length ? `
-      ${searchBox("f-psearch", "Filter paints…", paintSearch)}
-      <div style="color:var(--muted);font-size:13px;margin:10px 0 8px">
+      <div class="filters">
+        ${searchBox("f-psearch", "Filter paints…", paintSearch)}
+        ${selectBox("f-pbrand", ["All brands", ...pickerBrands], paintBrand)}
+      </div>
+      <div style="color:var(--muted);font-size:13px;margin:0 0 8px">
         Tick every paint you used on this mini. Ones you own are listed first${
           matched.length > list.length
             ? `, and only the first ${list.length} of ${matched.length} are shown —
-               keep typing to narrow it down` : ""}.</div>
+               keep typing to narrow it down` : ""}.${
+          chosen.size ? ` ${plural(chosen.size, "paint")} ticked so far —
+            narrowing the filters hides rows but never unticks them.` : ""}</div>
       <div class="picker">${list.map(p => `
         <label><input type="checkbox" data-pid="${p.id}"${chosen.has(p.id) ? " checked" : ""}>
           <span class="swatch" style="background:${esc(p.hex)};width:16px;height:16px"></span>
@@ -711,11 +738,18 @@ async function modelDialog(model) {
       closeModal(); state.models.selected = null; renderModels();
     };
 
-    if (tab === "details") $("#f-name").focus();
+    // A tab switch leaves focus on the tab button, so drop the caret somewhere
+    // useful. A re-render mid-typing has already put it back, and that wins.
+    if (!$("#modal").contains(document.activeElement)) {
+      const first = tab === "details" ? $("#f-name")
+                  : tab === "paints" ? $("#f-psearch") : null;
+      if (first) first.focus();
+    }
 
     if (tab === "paints" && allPaints.length) {
       const ps = $("#f-psearch");
       ps.oninput = debounce(() => { collect(); paintSearch = ps.value; render(); }, 150);
+      $("#f-pbrand").onchange = e => { paintBrand = e.target.value; render(); };
       $("#modal").querySelectorAll(".picker input").forEach(cb => {
         cb.onchange = () => {
           const id = +cb.dataset.pid;
