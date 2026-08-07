@@ -62,7 +62,7 @@ be added, and deleting one is permanent unless you ask for the built-in set back
 Paints start out unowned — tick "I own this paint" as you buy them, and the
 dashboard counts what's actually on your desk.
 
-**Technique Tips** — recipes and methods, searchable by title, body or tag.
+**Technique Notes** — recipes and methods, searchable by title, body or tag.
 
 **Photos** — added through a native file picker and *copied* into the app's own
 folder, so moving or deleting the originals later doesn't break anything.
