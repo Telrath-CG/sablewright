@@ -8,7 +8,7 @@
 /* Themes
    -------
    Both palettes are defined here as tokens and nothing below this block
-   hardcodes a colour, so switching themes is purely a matter of which set of
+   hardcodes a color, so switching themes is purely a matter of which set of
    custom properties wins.
 
    The theme is chosen by a `data-theme` attribute on <html>, set by a small
@@ -20,7 +20,7 @@
    `color-scheme` must track the active theme. Declaring it is what stops the
    webview treating the page as scheme-unaware and force-darkening a light
    palette; setting it to `dark` is also what makes native scrollbars, date
-   pickers and colour inputs render dark rather than staying stubbornly white. */
+   pickers and color inputs render dark rather than staying stubbornly white. */
 
 :root {
   color-scheme: light;
@@ -179,7 +179,7 @@
 }
 
 /* The dropdown arrow is a data URI and a data URI can't reference a custom
-   property, so this is the one colour tokenisation can't reach - it has to be
+   property, so this is the one color tokenisation can't reach - it has to be
    restated per theme instead. Left as --muted's value in each palette. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) select,
@@ -231,7 +231,9 @@ input, textarea { user-select: text; }
   padding: 20px 0 14px;
 }
 
-.brand { display: flex; align-items: center; gap: 10px; padding: 0 18px 20px; }
+/* Scoped to the sidebar: the paint table has a brand cell of its own, and an
+   unscoped rule here turns it into a flex row with the sidebar's padding. */
+.sidebar .brand { display: flex; align-items: center; gap: 10px; padding: 0 18px 20px; }
 /* One row, not stacked: this held "Painting" over "Tracker", but Sablewright
    is a single word and breaking it across two lines reads as a typo. */
 .brand-text { display: flex; line-height: 1.2; white-space: nowrap; }
@@ -419,7 +421,7 @@ select:focus { border-color: var(--accent); }
 .ptable { width: 100%; }
 .ptable .thead, .ptable .trow {
   display: grid;
-  grid-template-columns: 34px minmax(0,1fr) 150px 110px 95px 95px;
+  grid-template-columns: 34px minmax(0,1fr) 170px 105px 90px 90px;
   align-items: center; gap: 12px; padding: 9px 18px;
 }
 .ptable .thead { color: var(--faint); font-size: 11px; font-weight: 700;
@@ -428,14 +430,25 @@ select:focus { border-color: var(--accent); }
 .ptable .trow:nth-child(even) { background: var(--panel-alt); }
 .ptable .trow:hover { background: var(--sel); }
 .ptable .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ptable .brand { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* the maker's own catalogue number, kept quiet next to the name */
+.ptable .code { font-weight: 400; color: var(--faint); font-size: 11px; }
+/* brand over range, two lines in one column, so the range doesn't cost a column
+   of its own in a table that already has six */
+.ptable .brand, .ptable .range {
+  display: block; color: var(--muted);
+  text-overflow: ellipsis; white-space: nowrap; overflow: hidden;
+}
+.ptable .range { color: var(--faint); font-size: 11px; }
 .ptable .r { text-align: right; }
 .tag {
   display: inline-block; background: var(--chip-bg); border: 1px solid var(--border);
   border-radius: 11px; padding: 2px 10px; font-size: 11px; color: var(--chip-text);
 }
 .yes { color: var(--ok); }
-.wish { color: var(--warn); }
+/* most of a stocked rack is paints you don't own yet, so this is the quiet
+   state, not a warning */
+.unowned { color: var(--faint); }
+.opt { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); }
 
 /* ---------------------------------------------------------------- tips */
 .tip-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
@@ -512,12 +525,12 @@ select:focus { border-color: var(--accent); }
 .picker label:hover { background: var(--hover); }
 .picker .meta { margin-left: auto; color: var(--faint); font-size: 11px; }
 
-.colour-row { display: flex; align-items: center; gap: 10px; }
-.colour-row input[type=color] {
+.color-row { display: flex; align-items: center; gap: 10px; }
+.color-row input[type=color] {
   width: 48px; height: 38px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--input-bg); padding: 3px; cursor: pointer;
 }
-.colour-row input[type=text] { flex: 1; }
+.color-row input[type=text] { flex: 1; }
 
 .note {
   background: var(--note-bg); border: 1px solid var(--note-border); color: var(--note-text);

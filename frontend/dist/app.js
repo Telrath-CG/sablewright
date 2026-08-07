@@ -7,15 +7,20 @@
 const App = () => window.go.main.App;
 
 const STATUSES = ["Backlog", "Assembled", "Primed", "In Progress", "Complete", "Display"];
-const STATUS_COLOURS = {
+const STATUS_COLORS = {
   "Backlog": "#9aa0a6", "Assembled": "#64748b", "Primed": "#8b5cf6",
   "In Progress": "#f59e0b", "Complete": "#22a06b", "Display": "#2563eb",
 };
 const PAINT_TYPES = ["Base", "Layer", "Shade", "Contrast", "Dry", "Technical",
-                     "Air", "Primer", "Metallic", "Wash", "Other"];
+                     "Air", "Primer", "Metallic", "Wash", "Glaze", "Ink", "Other"];
+// The rack ships with well over a thousand paints, and every keystroke in the
+// search box rebuilds the list. Past a few hundred rows that starts to drag,
+// and nobody reads row 900 anyway - so cap what's drawn and say so.
+const ROW_LIMIT = 300;
+const PICKER_LIMIT = 200;
 const TIP_CATEGORIES = ["Priming", "Basecoating", "Highlighting", "Shading", "Blending",
                         "Metallics", "Effects", "Basing", "Varnishing", "Tools", "Other"];
-const TIP_COLOURS = {
+const TIP_COLORS = {
   "Priming": "#8b5cf6", "Basecoating": "#0ea5e9", "Highlighting": "#f59e0b",
   "Shading": "#6366f1", "Blending": "#2563eb", "Metallics": "#c08a2d",
   "Effects": "#22a06b", "Basing": "#a16207", "Varnishing": "#0891b2",
@@ -30,7 +35,8 @@ const MAGNIFIER =
 const state = {
   screen: "dashboard",
   models: { search: "", status: "All", sort: "Recent", selected: null },
-  paints: { search: "", type: "All types", brand: "All brands", owned: "All" },
+  paints: { search: "", type: "All types", brand: "All brands",
+            range: "All ranges", owned: "All" },
   tips:   { search: "", category: "All" },
 };
 
@@ -85,7 +91,7 @@ async function call(fn, ...args) {
 }
 
 function badge(status) {
-  return `<span class="badge" style="background:${STATUS_COLOURS[status] || "#6b7280"}">${esc(status)}</span>`;
+  return `<span class="badge" style="background:${STATUS_COLORS[status] || "#6b7280"}">${esc(status)}</span>`;
 }
 
 function searchBox(id, placeholder, value) {
@@ -176,8 +182,8 @@ async function renderDashboard() {
 
   const cards = [
     [s.models, "Minis tracked", "#2f7d8a"],
-    [s.inProgress, "In progress", STATUS_COLOURS["In Progress"]],
-    [s.finished, "Finished", STATUS_COLOURS["Complete"]],
+    [s.inProgress, "In progress", STATUS_COLORS["In Progress"]],
+    [s.finished, "Finished", STATUS_COLORS["Complete"]],
     [s.sessions, s.minutes ? `Sessions · ${duration(s.minutes)}` : "Sessions logged", "#0ea5e9"],
     [s.paintsOwned, "Paints owned", "#8b5cf6"],
   ].map(([n, l, c]) => `
@@ -191,7 +197,7 @@ async function renderDashboard() {
     const h = v ? Math.max(6, Math.round((v / max) * 100)) : 2;
     return `<div class="col">
       <div class="val" style="color:${v ? "var(--text)" : "var(--faint)"}">${v}</div>
-      <div class="bar" style="height:${h}%;background:${v ? STATUS_COLOURS[st] : "#e3e8ee"}"></div>
+      <div class="bar" style="height:${h}%;background:${v ? STATUS_COLORS[st] : "#e3e8ee"}"></div>
       <div class="lbl">${st}</div>
     </div>`;
   }).join("");
@@ -211,7 +217,7 @@ async function renderDashboard() {
 
   const recent = s.recent.length
     ? s.recent.map(m => `<div class="mini-row">
-        <span class="dot" style="background:${STATUS_COLOURS[m.status]}"></span>
+        <span class="dot" style="background:${STATUS_COLORS[m.status]}"></span>
         <span class="name">${esc(m.name)}</span>
         <span class="date">${m.completed ? prettyDate(m.completed) : ""}</span></div>`).join("")
     : `<div class="empty">No finished minis yet — they'll show up here.</div>`;
@@ -327,7 +333,7 @@ async function renderModelDetail(id) {
     <div class="photo">
       <img src="/photos/${encodeURIComponent(p.file)}" alt="" data-file="${esc(p.file)}">
       <div class="cap"><span class="badge" style="background:${
-        p.kind === "Final" ? STATUS_COLOURS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span></div>
+        p.kind === "Final" ? STATUS_COLORS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span></div>
     </div>`).join("")
     : `<div style="color:var(--muted);font-size:13px">No photos yet — add progress shots when you edit this mini.</div>`;
 
@@ -396,43 +402,50 @@ function debounce(fn, ms) {
 /* =================================================================== PAINTS */
 async function renderPaints() {
   const f = state.paints;
-  const [rows, brands] = await Promise.all([
-    call(App().ListPaints, { search: f.search, type: f.type, brand: f.brand, owned: f.owned }),
-    call(App().Brands),
-  ]);
-  const all = await call(App().AllPaints);
+  // Facets first: the range list depends on the brand, and a brand can vanish
+  // under us if its last paint was deleted.
+  const facets = await call(App().Facets, f.brand === "All brands" ? "" : f.brand);
+  if (!facets.brand) f.brand = "All brands";
+  if (!facets.ranges.includes(f.range)) f.range = "All ranges";
 
-  if (!brands.includes(f.brand)) f.brand = "All brands";
+  const page = await call(App().ListPaints, { search: f.search, type: f.type,
+    brand: f.brand, range: f.range, owned: f.owned, limit: ROW_LIMIT });
+  const shown = page.rows;
 
-  const body = rows.length ? rows.map(p => `
+  const body = page.total ? shown.map(p => `
     <div class="trow" data-id="${p.id}">
       <span class="swatch" style="background:${esc(p.hex)}"></span>
-      <span class="nm">${esc(p.name)}</span>
-      <span class="brand">${esc(p.brand || "—")}</span>
+      <span class="nm">${esc(p.name)}${
+        p.code ? ` <span class="code">${esc(p.code)}</span>` : ""}</span>
+      <span class="brand">${esc(p.brand || "—")}${
+        p.range ? `<span class="range">${esc(p.range)}</span>` : ""}</span>
       <span><span class="tag">${esc(p.type)}</span></span>
       <span class="r" style="color:var(--muted)">${p.usedOn ? plural(p.usedOn, "mini", "minis") : "—"}</span>
-      <span class="r ${p.owned ? "yes" : "wish"}">${p.owned ? "✓ Yes" : "☆ Wishlist"}</span>
-    </div>`).join("")
-    : (all.length
+      <span class="r ${p.owned ? "yes" : "unowned"}">${p.owned ? "✓ Yes" : "☆ No"}</span>
+    </div>`).join("") + (page.total > shown.length
+      ? `<div class="empty">Showing the first ${shown.length} of ${page.total}.
+           Search or narrow the filters to see the rest.</div>` : "")
+    : (facets.total
         ? `<div class="empty">No paints match those filters.</div>`
         : `<div class="empty"><strong>Your paint rack is empty.</strong>
-             Add them one at a time, or start from a common set:
-             <div style="margin-top:12px"><button class="btn ghost" id="starter">
-               Load starter paint set (${StarterCount}&nbsp;paints)</button></div></div>`);
+             Add paints one at a time, or put the built-in ranges back:
+             <div style="margin-top:12px"><button class="btn ghost" id="restore-lib">
+               Restore built-in paints</button></div></div>`);
 
   content().innerHTML = `
     <div class="page-head">
       <div><h1>Paint Inventory</h1>
-        <div class="sub">${plural(all.length, "paint")} in your collection${
-          rows.length !== all.length ? ` — showing ${rows.length}` : ""}</div></div>
+        <div class="sub">${plural(facets.total, "paint")} listed · ${facets.owned} owned${
+          page.total !== facets.total ? ` — ${page.total} match` : ""}</div></div>
       <div class="spacer"></div>
       <button class="btn" id="add-paint">+&nbsp; Add Paint</button>
     </div>
     <div class="filters">
-      ${searchBox("p-search", "Search paints…", f.search)}
+      ${searchBox("p-search", "Search paints, ranges, codes…", f.search)}
+      ${selectBox("p-brand", ["All brands", ...facets.brands], f.brand)}
+      ${selectBox("p-range", ["All ranges", ...facets.ranges], f.range)}
       ${selectBox("p-type", ["All types", ...PAINT_TYPES], f.type)}
-      ${selectBox("p-brand", ["All brands", ...brands], f.brand)}
-      ${selectBox("p-owned", ["All", "Owned only", "Wishlist only"], f.owned)}
+      ${selectBox("p-owned", ["All", "Owned only", "Not owned"], f.owned)}
     </div>
     <div class="card ptable">
       <div class="thead"><span></span><span>NAME</span><span>BRAND</span>
@@ -445,25 +458,24 @@ async function renderPaints() {
   search.oninput = debounce(() => { f.search = search.value; renderPaints(); }, 180);
   $("#p-type").onchange = e => { f.type = e.target.value; renderPaints(); };
   $("#p-brand").onchange = e => { f.brand = e.target.value; renderPaints(); };
+  $("#p-range").onchange = e => { f.range = e.target.value; renderPaints(); };
   $("#p-owned").onchange = e => { f.owned = e.target.value; renderPaints(); };
   $("#add-paint").onclick = () => paintDialog(null);
 
-  const starter = $("#starter");
-  if (starter) starter.onclick = async () => {
-    const n = await call(App().AddStarterPaints);
+  const restore = $("#restore-lib");
+  if (restore) restore.onclick = async () => {
+    const n = await call(App().RestoreLibraryPaints);
     toast(`Added ${plural(n, "paint")}`);
     renderPaints();
   };
 
   content().querySelectorAll(".trow").forEach(row => {
-    row.onclick = async () => {
-      const p = (await call(App().AllPaints)).find(x => x.id === +row.dataset.id);
+    row.onclick = () => {
+      const p = shown.find(x => x.id === +row.dataset.id);
       if (p) paintDialog(p);
     };
   });
 }
-
-const StarterCount = 36;
 
 /* ===================================================================== TIPS */
 async function renderTips() {
@@ -471,7 +483,7 @@ async function renderTips() {
   const tips = await call(App().ListTips, { search: f.search, category: f.category });
 
   const cards = tips.length ? `<div class="tip-grid">${tips.map(t => {
-    const col = TIP_COLOURS[t.category] || "#6b7280";
+    const col = TIP_COLORS[t.category] || "#6b7280";
     const lines = (t.body || "").split("\n").filter(l => l.trim()).slice(0, 6);
     return `<div class="card tip" data-id="${t.id}">
       <div class="stripe" style="background:${col}"></div>
@@ -538,8 +550,14 @@ async function modelDialog(model) {
 
   function render() {
     const chosen = new Set(m.paintIds || []);
-    const list = allPaints.filter(p =>
-      !paintSearch || (p.name + " " + p.brand).toLowerCase().includes(paintSearch.toLowerCase()));
+    const q = paintSearch.toLowerCase();
+    // The rack holds the whole catalogue, so float the paints that are
+    // actually on the desk — owned, or already ticked — to the top.
+    const matched = allPaints
+      .filter(p => !q || (p.name + " " + p.brand + " " + p.range + " " + p.code)
+        .toLowerCase().includes(q))
+      .sort((a, b) => (chosen.has(b.id) - chosen.has(a.id)) || (b.owned - a.owned));
+    const list = matched.slice(0, PICKER_LIMIT);
 
     const details = `
       <div class="field"><label>Name</label>
@@ -565,12 +583,16 @@ async function modelDialog(model) {
     const paintsTab = allPaints.length ? `
       ${searchBox("f-psearch", "Filter paints…", paintSearch)}
       <div style="color:var(--muted);font-size:13px;margin:10px 0 8px">
-        Tick every paint you used on this mini.</div>
+        Tick every paint you used on this mini. Ones you own are listed first${
+          matched.length > list.length
+            ? `, and only the first ${list.length} of ${matched.length} are shown —
+               keep typing to narrow it down` : ""}.</div>
       <div class="picker">${list.map(p => `
         <label><input type="checkbox" data-pid="${p.id}"${chosen.has(p.id) ? " checked" : ""}>
           <span class="swatch" style="background:${esc(p.hex)};width:16px;height:16px"></span>
           <span>${esc(p.name)}</span>
-          <span class="meta">${esc(p.brand)} · ${esc(p.type)}</span></label>`).join("")}</div>`
+          <span class="meta">${esc(p.brand)}${p.range ? " " + esc(p.range) : ""} · ${
+            esc(p.type)}${p.owned ? "" : " · not owned"}</span></label>`).join("")}</div>`
       : `<div class="note">Your paint rack is empty. Add some paints in Paint Inventory
            first, then come back and tick the ones you used.</div>`;
 
@@ -586,7 +608,7 @@ async function modelDialog(model) {
           <img src="/photos/${encodeURIComponent(p.file)}" alt="">
           <div class="cap">
             <span class="badge" style="background:${
-              p.kind === "Final" ? STATUS_COLOURS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span>
+              p.kind === "Final" ? STATUS_COLORS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span>
             <span class="x" data-photo="${p.id}">✕</span></div>
         </div>`).join("") || `<div style="color:var(--muted);font-size:13px">
           No photos yet. Add a progress shot or a final picture.</div>`}</div>`;
@@ -765,20 +787,23 @@ async function modelDialog(model) {
 }
 
 /* ---- paint ---- */
-const KNOWN_BRANDS = ["Citadel", "Vallejo", "Army Painter", "Scale75", "AK Interactive",
-                      "Kimera", "Two Thin Coats", "Pro Acryl", "Reaper", "Tamiya",
-                      "Golden", "Turbo Dork", "Green Stuff World"];
+const KNOWN_BRANDS = ["Warhammer Colour", "Vallejo", "Army Painter", "Scale75",
+                      "AK Interactive", "Kimera", "Two Thin Coats", "Pro Acryl",
+                      "Ionic Smart Colors", "Reaper", "Tamiya", "Golden",
+                      "Turbo Dork", "Green Stuff World"];
 
 async function paintDialog(paint) {
   const isNew = !paint;
   const p = paint ? { ...paint } : {
-    id: 0, name: "", brand: "", type: "Base", hex: "#888888", owned: true, notes: "",
+    id: 0, name: "", brand: "", range: "", code: "", type: "Base",
+    hex: "#888888", owned: true, notes: "",
   };
   // suggestions = brands already in the collection, plus the common ones,
   // but the field is free text so any brand can simply be typed in
-  const used = await call(App().Brands);
-  const suggestions = [...new Set([...used, ...KNOWN_BRANDS])].sort((a, b) =>
+  const facets = await call(App().Facets, p.brand || "");
+  const suggestions = [...new Set([...facets.brands, ...KNOWN_BRANDS])].sort((a, b) =>
     a.toLowerCase().localeCompare(b.toLowerCase()));
+  const ranges = facets.ranges;
 
   openModal(`
     <header><h2>${isNew ? "Add Paint" : "Edit Paint"}</h2><button class="close">✕</button></header>
@@ -795,13 +820,24 @@ async function paintDialog(paint) {
         </div>
         <div class="field"><label>Type</label>${selectBox("p-type-f", PAINT_TYPES, p.type)}</div>
       </div>
-      <div class="field"><label>Colour</label>
-        <div class="colour-row">
-          <input type="color" id="p-colour" value="${esc(p.hex)}">
+      <div class="grid2">
+        <div class="field"><label>Range <span class="opt">(optional)</span></label>
+          <input type="text" id="p-range-f" value="${esc(p.range)}" list="range-list"
+                 placeholder="e.g. Layer, Wave 2" autocomplete="off">
+          <datalist id="range-list">${
+            ranges.map(r => `<option value="${esc(r)}">`).join("")}</datalist>
+        </div>
+        <div class="field"><label>Code <span class="opt">(optional)</span></label>
+          <input type="text" id="p-code-f" value="${esc(p.code)}"
+                 placeholder="e.g. AK11001" spellcheck="false"></div>
+      </div>
+      <div class="field"><label>Color</label>
+        <div class="color-row">
+          <input type="color" id="p-color" value="${esc(p.hex)}">
           <input type="text" id="p-hex" value="${esc(p.hex)}" spellcheck="false">
         </div></div>
       <label class="check"><input type="checkbox" id="p-owned"${p.owned ? " checked" : ""}>
-        I own this paint (untick to keep it as a wishlist item)</label>
+        I own this paint (untick and it stays listed as one you don't)</label>
       ${!isNew ? `<div style="color:var(--muted);font-size:13px;margin-top:14px">
         Used on ${plural(paint.usedOn || 0, "mini", "minis")}.</div>` : ""}
     </div>
@@ -813,9 +849,9 @@ async function paintDialog(paint) {
     </footer>`);
 
   $("#p-name").focus();
-  const colour = $("#p-colour"), hex = $("#p-hex");
-  colour.oninput = () => { hex.value = colour.value; };
-  hex.oninput = () => { if (/^#[0-9a-f]{6}$/i.test(hex.value)) colour.value = hex.value; };
+  const color = $("#p-color"), hex = $("#p-hex");
+  color.oninput = () => { hex.value = color.value; };
+  hex.oninput = () => { if (/^#[0-9a-f]{6}$/i.test(hex.value)) color.value = hex.value; };
 
   $("#p-cancel").onclick = closeModal;
   $("#p-save").onclick = async () => {
@@ -823,6 +859,8 @@ async function paintDialog(paint) {
       ...p,
       name: $("#p-name").value.trim(),
       brand: $("#p-brand-f").value.trim(),
+      range: $("#p-range-f").value.trim(),
+      code: $("#p-code-f").value.trim(),
       type: $("#p-type-f").value,
       hex: hex.value.trim(),
       owned: $("#p-owned").checked,
