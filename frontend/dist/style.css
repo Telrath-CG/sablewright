@@ -232,7 +232,9 @@ input, textarea { user-select: text; }
 }
 
 .brand { display: flex; align-items: center; gap: 10px; padding: 0 18px 20px; }
-.brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+/* One row, not stacked: this held "Painting" over "Tracker", but Sablewright
+   is a single word and breaking it across two lines reads as a typo. */
+.brand-text { display: flex; line-height: 1.2; white-space: nowrap; }
 .brand-text span { color: var(--nav-strong); font-weight: 700; font-size: 15px; }
 .brand-text .accent { color: var(--brand-accent); }
 
