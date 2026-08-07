@@ -100,6 +100,49 @@ function selectBox(id, options, value) {
     `</select>`;
 }
 
+/* ---------------------------------------------------------------- theme */
+// An entry in storage is an explicit choice and wins; with nothing stored the
+// app follows the OS. index.html applies the same logic inline before first
+// paint - this half only handles switching and keeps the button label honest.
+const THEME_KEY = "sablewright.theme";
+
+function storedTheme() {
+  try {
+    const t = localStorage.getItem(THEME_KEY);
+    return t === "light" || t === "dark" ? t : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function systemTheme() {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function currentTheme() { return storedTheme() || systemTheme(); }
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute("data-theme", theme);
+  // The label names what the click will do, not what is currently on.
+  const label = $("#btn-theme span");
+  if (label) label.textContent = theme === "dark" ? "Light mode" : "Dark mode";
+}
+
+function initTheme() {
+  applyTheme(currentTheme());
+
+  $("#btn-theme").onclick = () => {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    try { localStorage.setItem(THEME_KEY, next); } catch (e) { /* session only */ }
+    applyTheme(next);
+  };
+
+  // Track the OS while the user has no explicit preference of their own.
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if (!storedTheme()) applyTheme(systemTheme());
+  });
+}
+
 /* ------------------------------------------------------------------ nav */
 function initNav() {
   $("#nav").addEventListener("click", e => {
@@ -854,6 +897,9 @@ function ready() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
+  // Before `ready()`, which waits on the Go bindings: the theme is pure
+  // frontend state and shouldn't sit behind the backend coming up.
+  initTheme();
   await ready();
   initNav();
   const warn = await App().StartupError();
