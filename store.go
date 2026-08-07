@@ -107,10 +107,6 @@ func today() string { return time.Now().Format("2006-01-02") }
 // DataDir returns the per-user folder where everything is kept.
 func DataDir() string { return appDir("Sablewright", "sablewright") }
 
-// legacyDataDir is where data lived before the app was renamed to Sablewright.
-// It exists only so an existing collection can be carried across once.
-func legacyDataDir() string { return appDir("MiniPaintingTracker", "mini-painting-tracker") }
-
 // appDir builds the platform-conventional data path. name is used on Windows
 // and macOS, which prefer title case; unixName is used on Linux, which doesn't.
 func appDir(name, unixName string) string {
@@ -133,32 +129,8 @@ func appDir(name, unixName string) string {
 	}
 }
 
-// migrateLegacyDir moves a pre-rename data folder to the new location, once.
-// It only ever acts when the new folder does not exist yet, so it cannot
-// overwrite newer data, and it deliberately ignores every failure: a
-// migration that doesn't happen leaves the old folder untouched and the app
-// starts empty, which is recoverable. Silently losing a collection would not be.
-func migrateLegacyDir(dir string) {
-	if _, err := os.Stat(dir); err == nil {
-		return // a Sablewright folder already exists; leave both alone
-	}
-	old := legacyDataDir()
-	if old == dir {
-		return
-	}
-	fi, err := os.Stat(old)
-	if err != nil || !fi.IsDir() {
-		return // nothing to migrate
-	}
-	if err := os.MkdirAll(filepath.Dir(dir), 0o755); err != nil {
-		return
-	}
-	_ = os.Rename(old, dir)
-}
-
 func NewStore() (*Store, error) {
 	dir := DataDir()
-	migrateLegacyDir(dir)
 	if err := os.MkdirAll(filepath.Join(dir, "photos"), 0o755); err != nil {
 		return nil, fmt.Errorf("could not create the data folder: %w", err)
 	}

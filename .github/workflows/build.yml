@@ -28,12 +28,12 @@ jobs:
             artifact: Sablewright-Linux
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: '1.26'
           cache: true
 
       # Wails needs GTK and WebKit headers to compile on Linux. Ubuntu 22.04
@@ -47,8 +47,11 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
 
-      - name: Resolve Go dependencies
-        run: go mod tidy
+      # Download, don't tidy: go.mod and go.sum are committed, so CI fetches
+      # exactly the pinned versions and verifies them against the checksums
+      # rather than re-resolving the dependency graph on every run.
+      - name: Download Go dependencies
+        run: go mod download
 
       # ---- Windows: a single .exe, plus an NSIS installer ----
       - name: Build (Windows)
@@ -78,7 +81,7 @@ jobs:
         run: wails build -platform linux/amd64 -ldflags "-w -s"
 
       - name: Upload build
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: |
