@@ -3,11 +3,29 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Declare the scheme explicitly. Without this the system webview treats
+  <!-- Declare the schemes explicitly. Without this the system webview treats
        the page as scheme-unaware and, when the OS is in dark mode, applies
-       its own auto-darkening filter - which turns every white panel grey. -->
-  <meta name="color-scheme" content="light" />
+       its own auto-darkening filter - which turns every white panel grey.
+       The app ships both palettes, so it claims both. -->
+  <meta name="color-scheme" content="light dark" />
   <title>Sablewright</title>
+
+  <!-- Set the theme before the stylesheet paints. Doing this from app.js
+       instead would show a flash of the light palette on every launch, since
+       that runs at the end of the body. Falls back to the OS preference when
+       the user has never chosen, and stays silent if storage is unavailable. -->
+  <script>
+    (function () {
+      try {
+        var t = localStorage.getItem("sablewright.theme");
+        if (t !== "light" && t !== "dark") {
+          t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+        }
+        document.documentElement.setAttribute("data-theme", t);
+      } catch (e) { /* no storage: the CSS media query still applies */ }
+    })();
+  </script>
+
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -22,7 +40,7 @@
           <circle cx="22" cy="12" r="2.4" fill="#f1c40f"/>
           <circle cx="10" cy="21" r="2.4" fill="#2ecc71"/>
         </svg>
-        <div class="brand-text"><span>Painting</span><span class="accent">Tracker</span></div>
+        <div class="brand-text"><span>Sable</span><span class="accent">wright</span></div>
       </div>
 
       <ul class="nav" id="nav">
@@ -33,6 +51,7 @@
       </ul>
 
       <div class="nav-footer">
+        <button id="btn-theme"><i>◐</i><span>Dark mode</span></button>
         <button id="btn-backup"><i>↓</i><span>Backup data</span></button>
         <button id="btn-restore"><i>↑</i><span>Import backup</span></button>
         <button id="btn-folder"><i>⚙</i><span>Data folder</span></button>
