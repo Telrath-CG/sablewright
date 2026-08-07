@@ -134,8 +134,23 @@ rem     -webview2 embed bundles the WebView2 bootstrapper, so the app
 rem     also works on older Windows 10 machines that lack the runtime.
 rem ---------------------------------------------------------------
 echo   [4/4] Building the app...
+
+rem     The version comes from wails.json rather than being repeated here, and
+rem     the commit is stamped alongside it so a build can say what it came
+rem     from. Both are optional - git in particular won't be installed on a
+rem     machine that only ever downloads this repo as a zip - and without them
+rem     the app simply calls itself a dev build.
+set "VERSION="
+for /f "delims=" %%V in ('powershell -NoProfile -Command "(Get-Content 'wails.json' -Raw ^| ConvertFrom-Json).info.productVersion" 2^>nul') do set "VERSION=%%V"
+set "COMMIT="
+for /f "delims=" %%C in ('git rev-parse --short HEAD 2^>nul') do set "COMMIT=%%C"
+
+set "LDF=-w -s"
+if defined VERSION set "LDF=%LDF% -X main.version=%VERSION%"
+if defined COMMIT set "LDF=%LDF% -X main.commit=%COMMIT%"
+
 echo.
-"%GOBIN%\wails.exe" build -platform windows/amd64 -webview2 embed -ldflags "-w -s"
+"%GOBIN%\wails.exe" build -platform windows/amd64 -webview2 embed -ldflags "%LDF%"
 echo.
 
 set "OUT="
