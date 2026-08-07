@@ -32,15 +32,19 @@
   <div class="app">
     <nav class="sidebar">
       <div class="brand">
+        <!-- A simplified cousin of build/icon.svg, not that file scaled down:
+             the app icon is drawn for 512px and its inner border, blade facets
+             and ferrule bands turn to mush at 30. Same shield geometry and the
+             same palette, reduced to the two marks that survive the size. The
+             sidebar is dark in both themes, so these colours are fixed. -->
         <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
-          <ellipse cx="15" cy="17" rx="13" ry="11" fill="#c9a15a" stroke="#a37f3c"/>
-          <ellipse cx="20" cy="18" rx="4.5" ry="4" fill="#232a33"/>
-          <circle cx="9"  cy="13" r="2.4" fill="#c0392b"/>
-          <circle cx="15" cy="10" r="2.4" fill="#2f7d8a"/>
-          <circle cx="22" cy="12" r="2.4" fill="#f1c40f"/>
-          <circle cx="10" cy="21" r="2.4" fill="#2ecc71"/>
+          <path d="M6.9,6.3 L25.1,6.3 L25.1,16.6 C25.1,22 20.6,25.4 16,27.4
+                   C11.4,25.4 6.9,22 6.9,16.6 Z"
+                fill="none" stroke="#e9e6e1" stroke-width="2.2" stroke-linejoin="round"/>
+          <path d="M12.4,12.2 L19.6,19.6" stroke="#b9bec4" stroke-width="2.6" stroke-linecap="round"/>
+          <path d="M19.6,12.2 L12.4,19.6" stroke="#e0a82e" stroke-width="2.6" stroke-linecap="round"/>
         </svg>
-        <div class="brand-text"><span>Sable</span><span class="accent">wright</span></div>
+        <div class="brand-text"><span>Sable</span><span class="accent">Wright</span></div>
       </div>
 
       <ul class="nav" id="nav">
