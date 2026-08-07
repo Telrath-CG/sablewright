@@ -486,7 +486,11 @@ func (s *Store) Paints(search, ptype, brand, owned string) []Paint {
 func (s *Store) AllPaints() []Paint {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := append([]Paint(nil), s.data.Paints...)
+	// A copy, so sorting can't reorder the stored slice. Built with make
+	// rather than appending to a nil slice: an empty rack would otherwise
+	// return nil, which marshals to JSON null instead of [], and the paint
+	// screens read .length off the result.
+	out := append(make([]Paint, 0, len(s.data.Paints)), s.data.Paints...)
 	sort.SliceStable(out, func(i, j int) bool {
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
