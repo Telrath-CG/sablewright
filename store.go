@@ -480,15 +480,24 @@ func (s *Store) SaveSession(modelID int, sess Session) (Model, error) {
 			}
 			return sa.ID > sb.ID
 		})
-		// first logged session doubles as the start date if none was set
-		if s.data.Models[i].Started == "" {
-			oldest := sess.Date
-			for _, e := range s.data.Models[i].Sessions {
-				if e.Date < oldest {
-					oldest = e.Date
-				}
+		// The oldest session doubles as the start date - you can't have been
+		// painting a mini before you started it. That fills the date in when
+		// nothing was set, and pulls it back when an entry is logged or
+		// re-dated earlier than the date on record, which is what happens
+		// when you remember a session after the fact.
+		//
+		// It only ever moves earlier. Logging a session today says nothing
+		// about when the mini was started, and deleting the oldest entry
+		// isn't evidence the start date was wrong either, so neither pushes
+		// it forward.
+		//
+		// The sort above leaves the list newest-first, so the oldest entry is
+		// the last one. Dates are ISO, so they compare as strings.
+		if n := len(s.data.Models[i].Sessions); n > 0 {
+			oldest := s.data.Models[i].Sessions[n-1].Date
+			if s.data.Models[i].Started == "" || oldest < s.data.Models[i].Started {
+				s.data.Models[i].Started = oldest
 			}
-			s.data.Models[i].Started = oldest
 		}
 		return s.data.Models[i], s.persist()
 	}
