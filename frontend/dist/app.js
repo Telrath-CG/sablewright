@@ -402,6 +402,15 @@ async function renderModelDetail(id) {
     : `<div style="color:var(--muted);font-size:13px">
          No sessions logged yet — use Edit → Painting log to add one.</div>`;
 
+  // The right-hand foot is a date once there is one and the status until
+  // then, so the label has to follow the value: "Finished: in progress" read
+  // as a contradiction. And under a "Status:" label the old fixed "in
+  // progress" would have been a plain lie for anything still in Backlog or
+  // Primed, so say which status it actually is.
+  const foot = m.completed
+    ? `Finished: ${prettyDate(m.completed)}`
+    : `Status: ${esc(m.status)}`;
+
   pane.innerHTML = `
     <div class="detail">
       <div class="title-row">
@@ -423,7 +432,7 @@ async function renderModelDetail(id) {
           totalMins ? ` · ${duration(totalMins)}` : ""}` : ""}</div>${logHtml}
       <div class="detail-foot">
         <span>Started: ${prettyDate(m.started)}</span>
-        <span>Finished: ${m.completed ? prettyDate(m.completed) : "in progress"}</span>
+        <span>${foot}</span>
       </div>
     </div>`;
 
