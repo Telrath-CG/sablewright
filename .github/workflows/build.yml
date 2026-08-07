@@ -1,17 +1,59 @@
 name: Build desktop apps
 
-# Runs on every push, and can also be started by hand from the Actions tab.
+# Pull requests get the cheap check job; merges to main get the full
+# three-platform build. Can also be started by hand from the Actions tab.
 on:
   push:
     branches: [main, master]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Pushing twice in quick succession shouldn't leave two runs racing to
+# finish: the newer commit cancels the older run rather than both burning
+# minutes on a result nobody will look at.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  # Pull requests only compile-check on Linux. Private-repo minutes bill at
+  # 1x on Linux but 2x on Windows and 10x on macOS, which makes the full
+  # matrix roughly ten times the cost of this job for a result that rarely
+  # differs. Platform-specific breakage still gets caught by the build job
+  # on merge; this catches the ordinary kind before it reaches main.
+  check:
+    name: Check (Linux)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+          cache: true
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Download Go dependencies
+        run: go mod download
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
   build:
     name: ${{ matrix.label }}
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false          # one platform failing shouldn't hide the others
@@ -89,4 +131,79 @@ jobs:
             build/bin/*.zip
             build/bin/Sablewright
           if-no-files-found: warn
-          retention-days: 90
+          # These are now just a hand-off to the release job, which keeps the
+          # durable copy. Short retention plus the cleanup job below is what
+          # keeps the 500 MB free-tier artifact quota flat.
+          retention-days: 7
+
+  # Publish the binaries to a rolling "latest" release, so there is one stable
+  # place to grab a current build from instead of digging through the Actions
+  # tab. Release assets also sit outside the 500 MB Actions artifact quota,
+  # which is what makes the short retention above affordable.
+  release:
+    name: Publish latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Collect the platform builds
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List what will be published
+        run: ls -lR dist
+
+      # The tag is deleted and recreated on each merge so it always points at
+      # the commit the binaries were actually built from. Marked prerelease:
+      # these are continuous builds off main, not tagged versions.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release delete latest --repo "$REPO" --yes --cleanup-tag || true
+          gh release create latest dist/* \
+            --repo "$REPO" \
+            --target "$GITHUB_SHA" \
+            --title "Latest build from main" \
+            --prerelease \
+            --notes "Continuous build of \`main\` at ${GITHUB_SHA:0:7}.
+
+          Produced by [run ${GITHUB_RUN_ID}](https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}). Replaced on every merge to main."
+
+  # Only the newest set of binaries is worth keeping. The free tier allows
+  # 500 MB of artifact storage and each run stores roughly 16 MB, so without
+  # this the quota fills after about thirty merges and uploads start failing.
+  #
+  # This runs only after every platform succeeded, so a failed build never
+  # deletes the last known-good binaries.
+  cleanup:
+    name: Remove superseded artifacts
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      # This is the only workflow in the repo, so "not from this run" is the
+      # same as "superseded". Revisit the filter if a second one is added.
+      - name: Delete artifacts from earlier runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" \
+            --jq ".artifacts[] | select(.workflow_run.id != $RUN_ID) | .id" \
+            > stale.txt
+          echo "$(wc -l < stale.txt) superseded artifact(s) to remove"
+          while read -r id; do
+            [ -n "$id" ] || continue
+            gh api -X DELETE "repos/$REPO/actions/artifacts/$id" \
+              && echo "deleted $id" \
+              || echo "could not delete $id (already gone?)"
+          done < stale.txt
