@@ -1,0 +1,89 @@
+name: Build desktop apps
+
+# Runs on every push, and can also be started by hand from the Actions tab.
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false          # one platform failing shouldn't hide the others
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            artifact: Sablewright-Windows
+          - os: macos-latest
+            label: macOS
+            artifact: Sablewright-macOS
+          - os: ubuntu-22.04
+            label: Linux
+            artifact: Sablewright-Linux
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache: true
+
+      # Wails needs GTK and WebKit headers to compile on Linux. Ubuntu 22.04
+      # ships webkit2gtk-4.0; 24.04 only has 4.1 and needs the webkit2_41 tag.
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+
+      - name: Resolve Go dependencies
+        run: go mod tidy
+
+      # ---- Windows: a single .exe, plus an NSIS installer ----
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        run: wails build -platform windows/amd64 -webview2 embed -ldflags "-w -s"
+
+      - name: Build installer (Windows)
+        if: runner.os == 'Windows'
+        run: wails build -platform windows/amd64 -webview2 embed -nsis -ldflags "-w -s"
+        continue-on-error: true      # the plain .exe is the important artifact
+
+      # ---- macOS: a universal .app, zipped so permissions survive ----
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        run: wails build -platform darwin/universal -ldflags "-w -s"
+
+      - name: Zip the .app (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd build/bin
+          ditto -c -k --keepParent "Sablewright.app" Sablewright-macOS.zip || \
+          ditto -c -k --keepParent Sablewright.app Sablewright-macOS.zip
+
+      # ---- Linux ----
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: wails build -platform linux/amd64 -ldflags "-w -s"
+
+      - name: Upload build
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            build/bin/*.exe
+            build/bin/*.zip
+            build/bin/Sablewright
+          if-no-files-found: warn
+          retention-days: 90
