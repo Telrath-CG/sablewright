@@ -131,9 +131,49 @@ jobs:
             build/bin/*.zip
             build/bin/Sablewright
           if-no-files-found: warn
-          # Backstop only. The cleanup job below is what actually keeps
-          # storage flat; this bounds the damage if it ever fails to run.
-          retention-days: 30
+          # These are now just a hand-off to the release job, which keeps the
+          # durable copy. Short retention plus the cleanup job below is what
+          # keeps the 500 MB free-tier artifact quota flat.
+          retention-days: 7
+
+  # Publish the binaries to a rolling "latest" release, so there is one stable
+  # place to grab a current build from instead of digging through the Actions
+  # tab. Release assets also sit outside the 500 MB Actions artifact quota,
+  # which is what makes the short retention above affordable.
+  release:
+    name: Publish latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Collect the platform builds
+        uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List what will be published
+        run: ls -lR dist
+
+      # The tag is deleted and recreated on each merge so it always points at
+      # the commit the binaries were actually built from. Marked prerelease:
+      # these are continuous builds off main, not tagged versions.
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release delete latest --repo "$REPO" --yes --cleanup-tag || true
+          gh release create latest dist/* \
+            --repo "$REPO" \
+            --target "$GITHUB_SHA" \
+            --title "Latest build from main" \
+            --prerelease \
+            --notes "Continuous build of \`main\` at ${GITHUB_SHA:0:7}.
+
+          Produced by [run ${GITHUB_RUN_ID}](https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}). Replaced on every merge to main."
 
   # Only the newest set of binaries is worth keeping. The free tier allows
   # 500 MB of artifact storage and each run stores roughly 16 MB, so without
