@@ -495,18 +495,18 @@ async function renderTips() {
           t.tags.slice(0, 6).map(x => `<span>#${esc(x)}</span>`).join("")}</div>` : ""}
       </div></div>`;
   }).join("")}</div>`
-    : `<div class="card"><div class="empty"><strong>No tips yet.</strong>
+    : `<div class="card"><div class="empty"><strong>No notes yet.</strong>
          Save your recipes here so you can find them again.</div></div>`;
 
   content().innerHTML = `
     <div class="page-head">
-      <div><h1>Technique Tips</h1>
+      <div><h1>Technique Notes</h1>
         <div class="sub">Your painting recipes &amp; methods — searchable</div></div>
       <div class="spacer"></div>
-      <button class="btn" id="add-tip">+&nbsp; Add Tip</button>
+      <button class="btn" id="add-tip">+&nbsp; Add Note</button>
     </div>
     <div class="filters">
-      ${searchBox("t-search", "Search tips, tags, recipes…", f.search)}
+      ${searchBox("t-search", "Search notes, tags, recipes…", f.search)}
       ${selectBox("t-cat", ["All", ...TIP_CATEGORIES], f.category)}
     </div>
     ${cards}`;
@@ -885,18 +885,18 @@ function tipDialog(tip) {
   const t = tip ? { ...tip } : { id: 0, title: "", category: "Other", body: "", tags: [] };
 
   openModal(`
-    <header><h2>${isNew ? "Add Technique Tip" : "Edit Tip"}</h2><button class="close">✕</button></header>
+    <header><h2>${isNew ? "Add Technique Note" : "Edit Note"}</h2><button class="close">✕</button></header>
     <div class="mbody">
       <div class="field"><label>Title</label>
         <input type="text" id="t-title" value="${esc(t.title)}"></div>
       <div class="field"><label>Category</label>${selectBox("t-cat-f", TIP_CATEGORIES, t.category)}</div>
-      <div class="field"><label>The tip / recipe (one step per line)</label>
+      <div class="field"><label>The note / recipe (one step per line)</label>
         <textarea id="t-body" style="min-height:150px">${esc(t.body)}</textarea></div>
       <div class="field"><label>Tags (comma separated)</label>
         <input type="text" id="t-tags" value="${esc((t.tags || []).join(", "))}"></div>
     </div>
     <footer>
-      ${!isNew ? `<button class="btn danger" id="t-del">Delete tip</button>` : ""}
+      ${!isNew ? `<button class="btn danger" id="t-del">Delete note</button>` : ""}
       <div class="spacer"></div>
       <button class="btn ghost" id="t-cancel">Cancel</button>
       <button class="btn" id="t-save">Save</button>
@@ -916,7 +916,7 @@ function tipDialog(tip) {
   };
   const del = $("#t-del");
   if (del) del.onclick = async () => {
-    const ok = await call(App().Confirm, "Delete tip", `Delete “${t.title}”?`, "Delete");
+    const ok = await call(App().Confirm, "Delete note", `Delete “${t.title}”?`, "Delete");
     if (!ok) return;
     await call(App().DeleteTip, t.id);
     closeModal(); renderTips();
