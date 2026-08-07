@@ -496,6 +496,9 @@ select:focus { border-color: var(--accent); }
 /* most of a stocked rack is paints you don't own yet, so this is the quiet
    state, not a warning */
 .unowned { color: var(--faint); }
+/* a second line under the stock word, the same one-column-for-two-facts trick
+   the brand and range use above - a wishlist flag doesn't earn a column */
+.ptable .want { display: block; color: var(--warn); font-size: 11px; }
 .opt { text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--faint); }
 
 /* ---------------------------------------------------------------- tips */

@@ -56,8 +56,10 @@ type PaintFilter struct {
 	Type   string `json:"type"`
 	Brand  string `json:"brand"`
 	Range  string `json:"range"`
-	Owned  string `json:"owned"`
-	Limit  int    `json:"limit"` // 0 = everything
+	// Stock is the stock-status filter: "Owned only", "Not owned",
+	// "On wishlist", or anything else for no filtering.
+	Stock string `json:"stock"`
+	Limit int    `json:"limit"` // 0 = everything
 }
 
 // PaintRow is a paint plus how many minis it's used on, so the table can show
@@ -77,7 +79,7 @@ type PaintPage struct {
 }
 
 func (a *App) ListPaints(f PaintFilter) PaintPage {
-	ps := a.store.Paints(f.Search, f.Type, f.Brand, f.Range, f.Owned)
+	ps := a.store.Paints(f.Search, f.Type, f.Brand, f.Range, f.Stock)
 	page := PaintPage{Total: len(ps), Rows: []PaintRow{}}
 	if f.Limit > 0 && len(ps) > f.Limit {
 		ps = ps[:f.Limit]
@@ -94,9 +96,10 @@ func (a *App) ListPaints(f PaintFilter) PaintPage {
 type PaintFacets struct {
 	Brands []string `json:"brands"`
 	Ranges []string `json:"ranges"`
-	Brand  string   `json:"brand"` // the requested brand, or "" if it's gone
-	Total  int      `json:"total"`
-	Owned  int      `json:"owned"`
+	Brand    string   `json:"brand"` // the requested brand, or "" if it's gone
+	Total    int      `json:"total"`
+	Owned    int      `json:"owned"`
+	Wishlist int      `json:"wishlist"`
 }
 
 // Facets reports the brands on offer and, for the brand asked about, its
@@ -112,7 +115,7 @@ func (a *App) Facets(brand string) PaintFacets {
 		}
 	}
 	f.Ranges = a.store.Ranges(f.Brand)
-	f.Total, f.Owned = a.store.PaintCounts()
+	f.Total, f.Owned, f.Wishlist = a.store.PaintCounts()
 	return f
 }
 
@@ -330,18 +333,13 @@ func (a *App) Restore() (bool, error) {
 	if err != nil || src == "" {
 		return false, err
 	}
-	choice, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-		Type:          wruntime.QuestionDialog,
-		Title:         "Import backup",
-		Message:       "This replaces everything currently in the app with the contents of that backup.\n\nContinue?",
-		Buttons:       []string{"Import", "Cancel"},
-		DefaultButton: "Cancel",
-		CancelButton:  "Cancel",
-	})
+	ok, err := a.Confirm("Import backup",
+		"This replaces everything currently in the app with the contents of that backup.\n\nContinue?",
+		"Import")
 	if err != nil {
 		return false, err
 	}
-	if choice != "Import" {
+	if !ok {
 		return false, nil
 	}
 
@@ -400,20 +398,52 @@ func (a *App) Restore() (bool, error) {
 	return true, nil
 }
 
-// Confirm shows a native yes/no dialog (used for deletes).
+// Confirm shows a native yes/no dialog (used for deletes and other actions
+// that can't be undone).
+//
+// Only macOS draws the buttons it's handed. Windows shows a fixed MB_YESNO
+// pair and Linux a GTK_BUTTONS_YES_NO one, and both answer with the button
+// they actually drew rather than the label asked for - so comparing against
+// okLabel alone reads every confirmation on those two as a refusal, and the
+// action silently never happens. Hence isAffirmative rather than ==.
 func (a *App) Confirm(title, message, okLabel string) (bool, error) {
 	if okLabel == "" {
 		okLabel = "OK"
+	}
+	// The safe button has to be named "No" off macOS: the Windows backend
+	// pre-selects it only when DefaultButton reads exactly that, and without
+	// it the destructive button is the one Enter presses.
+	cancelLabel := "Cancel"
+	if runtime.GOOS != "darwin" {
+		cancelLabel = "No"
 	}
 	choice, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
 		Type:          wruntime.QuestionDialog,
 		Title:         title,
 		Message:       message,
-		Buttons:       []string{okLabel, "Cancel"},
-		DefaultButton: "Cancel",
-		CancelButton:  "Cancel",
+		Buttons:       []string{okLabel, cancelLabel},
+		DefaultButton: cancelLabel,
+		CancelButton:  cancelLabel,
 	})
-	return choice == okLabel, err
+	if err != nil {
+		return false, err
+	}
+	return isAffirmative(choice, okLabel), nil
+}
+
+// isAffirmative reports whether a dialog answer means "go ahead". macOS hands
+// back the label it was given; the other two hand back their own word for yes,
+// and GTK says "OK" where Windows says "Ok".
+func isAffirmative(choice, okLabel string) bool {
+	choice = strings.TrimSpace(choice)
+	if choice == "" {
+		return false
+	}
+	switch strings.ToLower(choice) {
+	case "yes", "ok":
+		return true
+	}
+	return strings.EqualFold(choice, strings.TrimSpace(okLabel))
 }
 
 func (a *App) Info(title, message string) {
