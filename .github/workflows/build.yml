@@ -225,10 +225,11 @@ jobs:
         if: runner.os == 'Linux'
         run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
 
-      - name: Package for Debian and Arch (Linux)
+      - name: Package for Debian, Fedora and Arch (Linux)
         if: runner.os == 'Linux'
         run: |
           nfpm pkg -f build/linux/nfpm.yaml --packager deb       --target build/bin/
+          nfpm pkg -f build/linux/nfpm.yaml --packager rpm       --target build/bin/
           nfpm pkg -f build/linux/nfpm.yaml --packager archlinux --target build/bin/
 
       # Same reasoning as the NSIS check: assert on the files rather than
@@ -238,15 +239,23 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           shopt -s nullglob
-          deb=(build/bin/*.deb); arch=(build/bin/*.pkg.tar.zst)
+          deb=(build/bin/*.deb); rpms=(build/bin/*.rpm); arch=(build/bin/*.pkg.tar.zst)
           [ ${#deb[@]} -gt 0 ]  || { echo "nfpm produced no .deb";  exit 1; }
+          [ ${#rpms[@]} -gt 0 ] || { echo "nfpm produced no .rpm";  exit 1; }
           [ ${#arch[@]} -gt 0 ] || { echo "nfpm produced no Arch package"; exit 1; }
-          ls -lh "${deb[@]}" "${arch[@]}"
+          ls -lh "${deb[@]}" "${rpms[@]}" "${arch[@]}"
 
-          # A .deb whose dependencies don't resolve installs nowhere, and that
-          # is invisible until someone tries. dpkg can at least confirm the
-          # control file parses and says what it should.
+          # A package whose dependencies don't resolve installs nowhere, and
+          # that stays invisible until someone tries it. Printing what each
+          # one actually requires puts the answer in the build log, where a
+          # wrong package name is obvious rather than latent. Diagnostics
+          # only, so a runner image without rpm skips it rather than failing.
           dpkg-deb --info "${deb[0]}"
+          if command -v rpm >/dev/null 2>&1; then
+            rpm -qp --requires "${rpms[0]}"
+          else
+            echo "(rpm not on this image - skipping the requires dump)"
+          fi
 
       - name: Upload build
         uses: actions/upload-artifact@v7
@@ -256,6 +265,7 @@ jobs:
             build/bin/*.exe
             build/bin/*.dmg
             build/bin/*.deb
+            build/bin/*.rpm
             build/bin/*.pkg.tar.zst
             build/bin/Sablewright
           if-no-files-found: warn
@@ -303,7 +313,9 @@ jobs:
           # carry the version and architecture in the form each ecosystem
           # expects, and renaming them to match the pattern above would only
           # make them look wrong to the tools that consume them.
-          for f in artifacts/Sablewright-Linux/*.deb artifacts/Sablewright-Linux/*.pkg.tar.zst; do
+          for f in artifacts/Sablewright-Linux/*.deb \
+                   artifacts/Sablewright-Linux/*.rpm \
+                   artifacts/Sablewright-Linux/*.pkg.tar.zst; do
             cp "$f" release/
           done
           ls -l release
