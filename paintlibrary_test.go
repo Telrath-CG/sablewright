@@ -80,14 +80,47 @@ func TestCitadelAirPaintsAreSuffixed(t *testing.T) {
 	}
 }
 
+// What each brand has to clear. These guard against a regenerated file quietly
+// dropping most of a range, so they sit under what actually ships - a maker
+// adding a few pots shouldn't fail the build.
+//
+// Kimera is why this is a table rather than the flat 100 it used to be. Even
+// with all nine of its ranges it lands around 70, so a three-figure minimum
+// would have meant the brand could never be listed at all.
+var brandFloor = map[string]int{
+	"Warhammer Colour":   350,
+	"AK Interactive":     450,
+	"Ionic Smart Colors": 170,
+	"Two Thin Coats":     170,
+	"Pro Acryl":          120,
+	"Kimera Kolors":      65,
+}
+
 func TestPaintLibraryCoversEveryBrand(t *testing.T) {
 	count := map[string]int{}
 	for _, p := range PaintLibrary() {
 		count[p.Brand]++
 	}
+
+	listed := map[string]bool{}
 	for _, b := range LibraryBrands {
-		if count[b] < 100 {
-			t.Errorf("%s has %d paints in the library, want a full range", b, count[b])
+		listed[b] = true
+		floor, ok := brandFloor[b]
+		if !ok {
+			t.Errorf("%s is in LibraryBrands with no floor in brandFloor; give it one "+
+				"so a range going missing is still caught", b)
+			continue
+		}
+		if count[b] < floor {
+			t.Errorf("%s has %d paints in the library, want at least %d", b, count[b], floor)
+		}
+	}
+
+	// A brand in the file but not in LibraryBrands clears every check above by
+	// never being looked at, which is how a whole range could rot unnoticed.
+	for b := range count {
+		if !listed[b] {
+			t.Errorf("%s is in the library but missing from LibraryBrands", b)
 		}
 	}
 }
