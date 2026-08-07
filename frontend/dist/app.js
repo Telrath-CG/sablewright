@@ -192,6 +192,120 @@ function initTheme() {
   });
 }
 
+/* ---------------------------------------------------------------- timer */
+// One desk, one painter - so one timer, and it lives in memory only. It
+// outlasts the dialog it was started from and every screen change, but not
+// the app itself: nothing is written to disk, and a running timer reaches the
+// store only when you stop it and save the log entry it fills in.
+const timer = {
+  modelId: 0,     // 0 = nothing running
+  modelName: "",
+  since: 0,       // ms epoch this running stretch began; 0 while paused
+  banked: 0,      // ms from stretches already closed off by a pause
+  tick: null,
+};
+
+function timerOn() { return timer.modelId !== 0; }
+function timerPaused() { return timerOn() && !timer.since; }
+
+function timerElapsed() {
+  return timer.banked + (timer.since ? Date.now() - timer.since : 0);
+}
+
+// The log stores whole minutes, and 47:40 at the desk is a 48 minute session.
+function timerMinutes() { return Math.round(timerElapsed() / 60000); }
+
+// m:ss while it's short, h:mm:ss once past the hour. duration() is the other
+// half of this - it formats minutes already banked in the log, this formats a
+// clock still running, so it needs the seconds ticking over to look alive.
+function clock(ms) {
+  const t = Math.max(0, Math.floor(ms / 1000));
+  const pad = n => String(n).padStart(2, "0");
+  const h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60;
+  return (h ? `${h}:${pad(m)}` : `${m}`) + `:${pad(t % 60)}`;
+}
+
+// Every clock face on screen updates off the one interval, and the tick only
+// writes a text node - no re-render, so it can't fight the caret or rebuild a
+// list under the user. Whatever is drawn fresh reads the time on its way past.
+function paintClocks() {
+  const face = clock(timerElapsed());
+  document.querySelectorAll(".timer-clock").forEach(el => { el.textContent = face; });
+}
+
+// The mini detail pane mirrors the timer next to its Edit button, so it goes
+// stale the moment anything else changes that state - and a stale "Start
+// timer" would restart a running count and throw the elapsed time away.
+// Skipped while a dialog is up, since the log tab has its own controls and
+// closeModal catches the pane up on the way out.
+function syncDetailTimer() {
+  if (state.screen !== "models" || !state.models.selected) return;
+  if (!$("#modal-backdrop").hidden) return;
+  renderModelDetail(state.models.selected);
+}
+
+function drawTimer() {
+  const el = $("#timer");
+  syncDetailTimer();
+  if (!timerOn()) { el.hidden = true; el.innerHTML = ""; return; }
+  const paused = timerPaused();
+  el.hidden = false;
+  // Three stacked rows rather than one: 200px of sidebar can't hold a name,
+  // a clock and two controls side by side, and spelling the buttons out beats
+  // hunting for pause and stop glyphs the webview's fonts might not carry.
+  el.innerHTML = `
+    <div class="who"><span class="dot${paused ? " off" : ""}"></span>
+      <span class="nm">${esc(timer.modelName)}</span></div>
+    <div class="timer-clock">${clock(timerElapsed())}</div>
+    <div class="row">
+      <button id="tm-toggle">${paused ? "Resume" : "Pause"}</button>
+      <button id="tm-stop" title="Stop and fill in the log entry">Stop</button>
+    </div>`;
+  $("#tm-toggle").onclick = () => (timerPaused() ? resumeTimer() : pauseTimer());
+  $("#tm-stop").onclick = stopTimer;
+}
+
+function startTimer(id, name) {
+  timer.modelId = id;
+  timer.modelName = name;
+  timer.banked = 0;
+  timer.since = Date.now();
+  clearInterval(timer.tick);
+  timer.tick = setInterval(paintClocks, 1000);
+  drawTimer();
+}
+
+function pauseTimer() {
+  if (!timerOn() || timerPaused()) return;
+  timer.banked += Date.now() - timer.since;
+  timer.since = 0;
+  drawTimer();
+}
+
+function resumeTimer() {
+  if (!timerOn() || !timerPaused()) return;
+  timer.since = Date.now();
+  drawTimer();
+}
+
+function clearTimer() {
+  clearInterval(timer.tick);
+  timer.tick = null;
+  timer.modelId = 0; timer.modelName = ""; timer.since = 0; timer.banked = 0;
+  drawTimer();
+}
+
+// Stopping writes nothing by itself. The store turns away a session with no
+// notes, so this hands the minutes to the log form and leaves you to say what
+// you actually got done - the entry isn't real until you save it.
+async function stopTimer() {
+  const id = timer.modelId, mins = timerMinutes();
+  clearTimer();
+  const m = await call(App().GetModel, id);
+  if (!m) { toast("That mini is gone — nothing logged"); return; }
+  modelDialog(m, { tab: "log", session: { minutes: mins } });
+}
+
 /* ------------------------------------------------------------------ nav */
 function initNav() {
   $("#nav").addEventListener("click", e => {
@@ -207,7 +321,9 @@ function initNav() {
   };
   $("#btn-restore").onclick = async () => {
     const ok = await call(App().Restore);
-    if (ok) { toast("Backup imported"); show(state.screen); }
+    // The whole collection has just been swapped out from under it, so a
+    // running timer is pointing at a mini from the previous dataset.
+    if (ok) { clearTimer(); toast("Backup imported"); show(state.screen); }
   };
   $("#btn-folder").onclick = () => call(App().OpenDataFolder);
 }
@@ -411,6 +527,17 @@ async function renderModelDetail(id) {
     ? `Finished: ${prettyDate(m.completed)}`
     : `Status: ${esc(m.status)}`;
 
+  // Starting a session is the one thing you want without opening the dialog
+  // first, so it sits next to Edit. Once something is running the sidebar
+  // pill owns the controls; this just reflects the state of this mini, and
+  // says nothing at all when the timer belongs to a different one.
+  const timerBtn = !timerOn()
+    ? `<button class="btn ghost small" id="start-timer">▶&nbsp; Start timer</button>`
+    : timer.modelId === m.id
+      ? `<span class="running"><span class="dot${timerPaused() ? " off" : ""}"></span>
+           <span class="timer-clock">${clock(timerElapsed())}</span></span>`
+      : "";
+
   pane.innerHTML = `
     <div class="detail">
       <div class="title-row">
@@ -422,6 +549,7 @@ async function renderModelDetail(id) {
       </div>
       <div style="display:flex;align-items:center;gap:10px">
         ${badge(m.status)}<span style="flex:1"></span>
+        ${timerBtn}
         <button class="btn ghost small" id="edit">Edit</button>
       </div>
       <div class="section">PHOTOS</div><div class="photos">${photos}</div>
@@ -437,6 +565,9 @@ async function renderModelDetail(id) {
     </div>`;
 
   $("#edit").onclick = () => modelDialog(m);
+  // no redraw here: startTimer -> drawTimer -> syncDetailTimer does it
+  const startBtn = $("#start-timer");
+  if (startBtn) startBtn.onclick = () => startTimer(m.id, m.name);
   $("#fav").onclick = async () => {
     await call(App().SaveModel, { ...m, favorite: !m.favorite });
     renderModels();
@@ -589,21 +720,28 @@ function closeModal() {
   $("#modal-backdrop").hidden = true;
   $("#modal").innerHTML = "";
   document.removeEventListener("keydown", escClose);
+  // A dialog can start or stop the timer before it closes, and Cancel and
+  // Escape don't redraw anything on their way out, so the pane behind would
+  // otherwise be left showing the state from before the dialog opened.
+  syncDetailTimer();
 }
 function escClose(e) { if (e.key === "Escape") closeModal(); }
 
 /* ---- mini ---- */
-async function modelDialog(model) {
+// opts lets a caller open straight onto a tab with the log form part-filled -
+// stopping the timer arrives here with the minutes already counted.
+async function modelDialog(model, opts = {}) {
   const isNew = !model;
   let m = model ? { ...model } : {
     id: 0, name: "", gameSystem: "", faction: "", status: "Backlog",
     favorite: false, notes: "", started: new Date().toISOString().slice(0, 10),
     completed: "", paintIds: [], photos: [],
   };
-  let tab = "details";
+  let tab = opts.tab || "details";
   let paintSearch = "";
   let paintBrand = "All brands";
-  let editSession = {};   // the log entry currently being edited, {} = new
+  // the log entry currently being edited, {} = new
+  let editSession = opts.session ? { ...opts.session } : {};
   const allPaints = await call(App().AllPaints);
   // The whole rack is already in hand, so the brand list comes off it rather
   // than out of a second trip to the backend.
@@ -682,9 +820,25 @@ async function modelDialog(model) {
           No photos yet. Add a progress shot or a final picture.</div>`}</div>`;
 
     const sess = m.sessions || [];
+    // The modal backdrop covers the sidebar, so while this dialog is open the
+    // pill out there can't be clicked - the log tab has to carry its own set
+    // of controls. A mini with no id yet has nothing to hang a session on.
+    const timerBar = !m.id ? "" : `<div class="timer-bar">${
+      !timerOn()
+        ? `<button class="btn ghost" id="s-start">▶&nbsp; Start timer</button>
+           <span class="hint">Counts while you paint — stop it and the minutes land below.</span>`
+        : timer.modelId === m.id
+          ? `<span class="dot${timerPaused() ? " off" : ""}"></span>
+             <span class="timer-clock">${clock(timerElapsed())}</span>
+             <button class="btn ghost" id="s-toggle">${timerPaused() ? "Resume" : "Pause"}</button>
+             <button class="btn" id="s-stop">Stop &amp; fill in</button>`
+          : `<span class="hint">Timer running on ${esc(timer.modelName)}.</span>`
+    }</div>`;
+
     const logTab = `
       ${!m.id ? `<div class="note">Log entries save straight away, so this mini needs
         a name first — add an entry and it'll be saved automatically.</div>` : ""}
+      ${timerBar}
       <div class="log-form">
         <div class="grid-log">
           <div class="field"><label>Date</label>
@@ -744,7 +898,9 @@ async function modelDialog(model) {
         `Delete “${m.name}” and its photos?\nThis can't be undone.`, "Delete");
       if (!ok) return;
       await call(App().DeleteModel, m.id);
-      closeModal(); state.models.selected = null; renderModels();
+      // Nothing left to log the session against.
+      if (timer.modelId === m.id) clearTimer();
+      closeModal(); state.models.selected = null; show(state.screen);
     };
 
     // A tab switch leaves focus on the tab button, so drop the caret somewhere
@@ -770,6 +926,21 @@ async function modelDialog(model) {
     }
 
     if (tab === "log") {
+      const st = $("#s-start");
+      if (st) st.onclick = () => { startTimer(m.id, m.name); render(); };
+      const tg = $("#s-toggle");
+      if (tg) tg.onclick = () => { timerPaused() ? resumeTimer() : pauseTimer(); render(); };
+      const sp = $("#s-stop");
+      if (sp) sp.onclick = () => {
+        // Keep whatever is already typed: the notes live in the DOM, not in
+        // editSession, so a re-render would otherwise wipe them.
+        editSession = { ...editSession, minutes: timerMinutes(), notes: $("#s-notes").value };
+        clearTimer();
+        render();
+        const n = $("#s-notes");
+        if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+      };
+
       $("#s-add").onclick = addSession;
       const ce = $("#s-cancel-edit");
       if (ce) ce.onclick = () => { editSession = {}; render(); };
@@ -854,7 +1025,10 @@ async function modelDialog(model) {
     if (!(await ensureSaved())) return;
     closeModal();
     state.models.selected = m.id;
-    renderModels();
+    // Redraw whichever screen is actually up, not the models list. Stopping
+    // the timer opens this dialog from wherever you happen to be, and jumping
+    // the content to Models would leave it disagreeing with the sidebar.
+    show(state.screen);
     toast("Saved");
   }
 

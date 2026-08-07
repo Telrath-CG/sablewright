@@ -55,6 +55,10 @@
       </ul>
 
       <div class="nav-footer">
+        <!-- The running session timer. It sits in the sidebar so it stays put
+             while you move around the app; app.js fills it in and hides it
+             again when nothing is running. -->
+        <div class="timer" id="timer" hidden></div>
         <button id="btn-theme"><i>◐</i><span>Dark mode</span></button>
         <button id="btn-backup"><i>↓</i><span>Backup data</span></button>
         <button id="btn-restore"><i>↑</i><span>Import backup</span></button>
