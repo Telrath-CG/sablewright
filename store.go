@@ -69,6 +69,8 @@ type Paint struct {
 	ID    int    `json:"id"`
 	Name  string `json:"name"`
 	Brand string `json:"brand"`
+	Range string `json:"range"` // the maker's own line: "Layer", "Wave 2", "3rd Gen Air"
+	Code  string `json:"code"`  // the maker's catalogue number, where they use one
 	Type  string `json:"type"`
 	Hex   string `json:"hex"`
 	Owned bool   `json:"owned"`
@@ -101,6 +103,15 @@ type Store struct {
 }
 
 var Statuses = []string{"Backlog", "Assembled", "Primed", "In Progress", "Complete", "Display"}
+
+// dataVersion is the shape of the file on disk. Bumping it runs migrate() once
+// against any collection saved by an older build.
+//
+//	1  the original
+//	2  paints carry a range and a code, and every collection is stocked with
+//	   the built-in paint library
+//	3  the library gained the Citadel Air range
+const dataVersion = 3
 
 func today() string { return time.Now().Format("2006-01-02") }
 
@@ -147,7 +158,8 @@ func (s *Store) Dir() string      { return s.dir }
 func (s *Store) load() error {
 	b, err := os.ReadFile(s.path)
 	if os.IsNotExist(err) {
-		s.data = Data{Version: 1, NextID: 1}
+		s.data = Data{Version: dataVersion, NextID: 1}
+		s.addLibraryPaints()
 		return s.persist()
 	}
 	if err != nil {
@@ -158,14 +170,67 @@ func (s *Store) load() error {
 		// user still has it, and carry on with an empty collection.
 		bad := s.path + ".corrupt-" + time.Now().Format("20060102-150405")
 		_ = os.Rename(s.path, bad)
-		s.data = Data{Version: 1, NextID: 1}
+		s.data = Data{Version: dataVersion, NextID: 1}
+		s.addLibraryPaints()
 		_ = s.persist()
 		return fmt.Errorf("your collection file could not be read and was set aside as %s; starting fresh", filepath.Base(bad))
 	}
 	if s.data.NextID < 1 {
 		s.data.NextID = 1
 	}
+	if s.data.Version < dataVersion {
+		s.migrate()
+		s.data.Version = dataVersion
+		return s.persist()
+	}
 	return nil
+}
+
+// migrate brings a collection saved by an older build up to dataVersion. It
+// runs with the file already loaded and before anything else can touch it, so
+// like persist() it does no locking of its own.
+func (s *Store) migrate() {
+	// Games Workshop renamed Citadel Colour to Warhammer Colour, and the
+	// library is stocked under the new name. Without this an older rack would
+	// list Abaddon Black twice, once per spelling.
+	for i, p := range s.data.Paints {
+		if to, ok := RenamedBrands[p.Brand]; ok {
+			s.data.Paints[i].Brand = to
+		}
+	}
+	s.addLibraryPaints()
+}
+
+// addLibraryPaints stocks the rack from the built-in library, skipping any
+// paint already there under the same brand and name so it can be re-run
+// without producing duplicates. Library paints arrive unowned: the rack is a
+// catalogue to tick off, not a claim that you own thirteen hundred pots.
+//
+// It also fills in the range and code on paints that predate those fields, so
+// a migrated collection filters the same way as a fresh one.
+func (s *Store) addLibraryPaints() int {
+	type ref struct{ brand, name string }
+	have := map[ref]int{}
+	for i, p := range s.data.Paints {
+		have[ref{strings.ToLower(p.Brand), strings.ToLower(p.Name)}] = i
+	}
+	added := 0
+	for _, lp := range PaintLibrary() {
+		k := ref{strings.ToLower(lp.Brand), strings.ToLower(lp.Name)}
+		if i, ok := have[k]; ok {
+			if s.data.Paints[i].Range == "" {
+				s.data.Paints[i].Range = lp.Range
+			}
+			if s.data.Paints[i].Code == "" {
+				s.data.Paints[i].Code = lp.Code
+			}
+			continue
+		}
+		lp.ID = s.nextID()
+		s.data.Paints = append(s.data.Paints, lp)
+		added++
+	}
+	return added
 }
 
 // persist writes atomically: full write to a temp file, fsync, then rename.
@@ -451,7 +516,7 @@ func (s *Store) DeleteSession(modelID, sessionID int) (Model, error) {
 // Paints
 // ---------------------------------------------------------------------------
 
-func (s *Store) Paints(search, ptype, brand, owned string) []Paint {
+func (s *Store) Paints(search, ptype, brand, rng, owned string) []Paint {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	search = strings.ToLower(strings.TrimSpace(search))
@@ -463,13 +528,18 @@ func (s *Store) Paints(search, ptype, brand, owned string) []Paint {
 		if brand != "" && brand != "All brands" && p.Brand != brand {
 			continue
 		}
+		if rng != "" && rng != "All ranges" && p.Range != rng {
+			continue
+		}
 		if owned == "Owned only" && !p.Owned {
 			continue
 		}
-		if owned == "Wishlist only" && p.Owned {
+		if owned == "Not owned" && p.Owned {
 			continue
 		}
-		if search != "" && !strings.Contains(strings.ToLower(p.Name+" "+p.Brand+" "+p.Notes), search) {
+		// the code is worth searching: it's how AK and Ionic pots are labelled
+		if search != "" && !strings.Contains(
+			strings.ToLower(p.Name+" "+p.Brand+" "+p.Range+" "+p.Code+" "+p.Notes), search) {
 			continue
 		}
 		out = append(out, p)
@@ -480,6 +550,37 @@ func (s *Store) Paints(search, ptype, brand, owned string) []Paint {
 		}
 		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
 	})
+	return out
+}
+
+// PaintCounts returns how many paints are in the rack and how many are owned.
+func (s *Store) PaintCounts() (total, owned int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, p := range s.data.Paints {
+		if p.Owned {
+			owned++
+		}
+	}
+	return len(s.data.Paints), owned
+}
+
+// Ranges lists the product lines on offer, narrowed to one brand when given.
+func (s *Store) Ranges(brand string) []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := map[string]bool{}
+	out := []string{}
+	for _, p := range s.data.Paints {
+		if brand != "" && brand != "All brands" && p.Brand != brand {
+			continue
+		}
+		if p.Range != "" && !seen[p.Range] {
+			seen[p.Range] = true
+			out = append(out, p.Range)
+		}
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -569,22 +670,14 @@ func (s *Store) PaintUsage(id int) int {
 	return n
 }
 
-func (s *Store) AddStarterPaints() (int, error) {
+// RestoreLibraryPaints puts back any built-in paints that have been deleted.
+// Nothing already in the rack is touched.
+func (s *Store) RestoreLibraryPaints() (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	existing := map[string]bool{}
-	for _, p := range s.data.Paints {
-		existing[strings.ToLower(p.Name)] = true
-	}
-	added := 0
-	for _, sp := range StarterPaints {
-		if existing[strings.ToLower(sp.Name)] {
-			continue
-		}
-		sp.ID = s.nextID()
-		sp.Owned = true
-		s.data.Paints = append(s.data.Paints, sp)
-		added++
+	added := s.addLibraryPaints()
+	if added == 0 {
+		return 0, nil
 	}
 	return added, s.persist()
 }
