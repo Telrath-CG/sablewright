@@ -1,5 +1,11 @@
 build/bin/
 node_modules/
+
+# `go build` with no -o drops the binary in the repo root; the real
+# release artifacts come from `wails build` and live in build/bin/.
+/sablewright
+/sablewright.exe
+
 *.syso
 go.local.mod
 go.local.sum
