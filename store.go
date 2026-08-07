@@ -111,7 +111,8 @@ var Statuses = []string{"Backlog", "Assembled", "Primed", "In Progress", "Comple
 //	2  paints carry a range and a code, and every collection is stocked with
 //	   the built-in paint library
 //	3  the library gained the Citadel Air range
-const dataVersion = 3
+//	4  the library gained Kimera Kolors, Pure and Signature Blends alike
+const dataVersion = 4
 
 func today() string { return time.Now().Format("2006-01-02") }
 
