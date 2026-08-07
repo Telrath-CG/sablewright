@@ -265,6 +265,54 @@ input, textarea { user-select: text; }
 .nav-footer button:hover { background: var(--nav-hover); color: var(--nav-hover-text); }
 .version { color: var(--nav-faint); font-size: 11px; text-align: center; padding-top: 10px; }
 
+/* ------------------------------------------------------------------ timer */
+/* The running session timer shows up on three surfaces. The pill lives in the
+   sidebar footer, so it survives every screen change and the dialog it was
+   started from - but the modal backdrop covers the sidebar, so the Painting
+   log tab carries its own controls (.timer-bar) for when a dialog is open,
+   and the detail pane shows a read-only face next to Edit. */
+
+/* A clock that reads out every second would jitter on proportional digits. */
+.timer-clock { font-variant-numeric: tabular-nums; }
+
+/* Sizes and radius win over the generic .dot on specificity, not source
+   order. The base .dot carries no background of its own - the dashboard sets
+   one inline per status - so these are the only rules colouring these. */
+.timer .dot, .timer-bar .dot, .running .dot { border-radius: 50%; background: var(--ok); }
+.timer .dot { width: 7px; height: 7px; flex: 0 0 7px; }
+.timer-bar .dot, .running .dot { width: 8px; height: 8px; flex: 0 0 8px; }
+.timer .dot.off, .timer-bar .dot.off, .running .dot.off { background: var(--faint); }
+
+.timer {
+  background: var(--nav-hover); border-radius: 8px;
+  padding: 9px 10px; margin-bottom: 10px;
+}
+/* an author display rule would beat the UA's [hidden] - see the backdrop */
+.timer[hidden] { display: none; }
+.timer .who { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+.timer .who .nm {
+  color: var(--nav-strong); font-size: 12px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.timer .timer-clock {
+  display: block; color: var(--nav-strong);
+  font-size: 18px; font-weight: 700; margin-bottom: 7px;
+}
+.timer .row { display: flex; gap: 6px; }
+.timer button {
+  flex: 1; background: var(--nav-bg); border: 0; color: var(--nav-muted);
+  cursor: pointer; font-size: 11px; padding: 5px 4px; border-radius: 5px;
+}
+.timer button:hover { color: var(--nav-strong); }
+
+/* the log tab's own copy, for when the backdrop has the sidebar covered */
+.timer-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.timer-bar .timer-clock { font-size: 19px; font-weight: 700; color: var(--text); }
+.timer-bar .hint { margin-top: 0; }
+
+/* the detail pane's read-only face, next to Edit */
+.running { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 13px; }
+
 /* ---------------------------------------------------------------- content */
 .content { flex: 1; overflow-y: auto; padding: 22px 24px 24px; }
 
