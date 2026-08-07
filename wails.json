@@ -1,0 +1,19 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "sablewright",
+  "outputfilename": "Sablewright",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "author": {
+    "name": "CJ"
+  },
+  "info": {
+    "companyName": "Sablewright",
+    "productName": "Sablewright",
+    "productVersion": "1.0.0",
+    "copyright": "",
+    "comments": "Track your miniature painting projects: progress, paints used and technique tips."
+  }
+}

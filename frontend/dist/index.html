@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Declare the scheme explicitly. Without this the system webview treats
+       the page as scheme-unaware and, when the OS is in dark mode, applies
+       its own auto-darkening filter - which turns every white panel grey. -->
+  <meta name="color-scheme" content="light" />
+  <title>Sablewright</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app">
+    <nav class="sidebar">
+      <div class="brand">
+        <svg viewBox="0 0 32 32" width="30" height="30" aria-hidden="true">
+          <ellipse cx="15" cy="17" rx="13" ry="11" fill="#c9a15a" stroke="#a37f3c"/>
+          <ellipse cx="20" cy="18" rx="4.5" ry="4" fill="#232a33"/>
+          <circle cx="9"  cy="13" r="2.4" fill="#c0392b"/>
+          <circle cx="15" cy="10" r="2.4" fill="#2f7d8a"/>
+          <circle cx="22" cy="12" r="2.4" fill="#f1c40f"/>
+          <circle cx="10" cy="21" r="2.4" fill="#2ecc71"/>
+        </svg>
+        <div class="brand-text"><span>Painting</span><span class="accent">Tracker</span></div>
+      </div>
+
+      <ul class="nav" id="nav">
+        <li data-screen="dashboard" class="active"><i>■</i><span>Dashboard</span></li>
+        <li data-screen="models"><i>▤</i><span>Models</span></li>
+        <li data-screen="paints"><i>●</i><span>Paint Inventory</span></li>
+        <li data-screen="tips"><i>✎</i><span>Technique Tips</span></li>
+      </ul>
+
+      <div class="nav-footer">
+        <button id="btn-backup"><i>↓</i><span>Backup data</span></button>
+        <button id="btn-restore"><i>↑</i><span>Import backup</span></button>
+        <button id="btn-folder"><i>⚙</i><span>Data folder</span></button>
+        <div class="version">v1.0</div>
+      </div>
+    </nav>
+
+    <main class="content" id="content"></main>
+  </div>
+
+  <div class="modal-backdrop" id="modal-backdrop" hidden>
+    <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>

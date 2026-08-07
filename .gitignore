@@ -1,0 +1,5 @@
+build/bin/
+node_modules/
+*.syso
+go.local.mod
+go.local.sum
