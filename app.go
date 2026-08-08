@@ -179,6 +179,10 @@ func (a *App) CopyText(s string) error {
 	return wruntime.ClipboardSetText(a.ctx, s)
 }
 
+// TimeReport adds up the painting log. The clock is read here rather than in
+// the store so the buckets it produces can be tested against a fixed day.
+func (a *App) TimeReport() TimeReport { return a.store.TimeReport(time.Now()) }
+
 func (a *App) AllPaints() []Paint   { return a.store.AllPaints() }
 func (a *App) Brands() []string     { return a.store.Brands() }
 func (a *App) Statuses() []string   { return Statuses }

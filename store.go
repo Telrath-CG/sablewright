@@ -734,6 +734,128 @@ func (s *Store) BackfillThumbs() int {
 }
 
 // ---------------------------------------------------------------------------
+// Time
+// ---------------------------------------------------------------------------
+
+// TimeBucket is one month of the log.
+type TimeBucket struct {
+	Key      string `json:"key"`   // 2026-08, for matching
+	Label    string `json:"label"` // Aug, for the axis
+	Year     int    `json:"year"`
+	Minutes  int    `json:"minutes"`
+	Sessions int    `json:"sessions"`
+}
+
+// MiniTime is what one entry cost. PerMini divides by the size of the batch,
+// which is the only reason counts are worth carrying: three hours on a squad
+// of ten is eighteen minutes a mini, and that is the number that tells you
+// whether the next squad is an evening or a fortnight.
+type MiniTime struct {
+	ID      int    `json:"id"`
+	Name    string `json:"name"`
+	Minutes int    `json:"minutes"`
+	Count   int    `json:"count"`
+	PerMini int    `json:"perMini"`
+}
+
+// TimeReport is the painting log added up. Everything here is derived from
+// the sessions; nothing new is recorded to produce it.
+type TimeReport struct {
+	Months    []TimeBucket `json:"months"` // the last twelve, oldest first
+	Total     int          `json:"total"`
+	ThisMonth int          `json:"thisMonth"`
+	Last30    int          `json:"last30"`
+	Sessions  int          `json:"sessions"`
+	// Average session length, and the average time a finished mini took.
+	PerSession int        `json:"perSession"`
+	PerMini    int        `json:"perMini"`
+	Busiest    []MiniTime `json:"busiest"`
+	// Days is how many separate days were spent at the desk, which is a
+	// truer measure of a habit than the number of sessions.
+	Days int `json:"days"`
+}
+
+// TimeReport adds up the log as of the given day. The day is passed in rather
+// than read from the clock so the buckets are testable, and so a report
+// generated at 23:59 and read at 00:01 doesn't disagree with itself.
+func (s *Store) TimeReport(now time.Time) TimeReport {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Twelve buckets ending on the current month, so the chart always spans
+	// a year even where the year has holes in it.
+	rep := TimeReport{Months: []TimeBucket{}, Busiest: []MiniTime{}}
+	index := map[string]int{}
+	first := now.AddDate(0, -11, 0)
+	for i := 0; i < 12; i++ {
+		m := first.AddDate(0, i, 0)
+		index[m.Format("2006-01")] = i
+		rep.Months = append(rep.Months, TimeBucket{
+			Key: m.Format("2006-01"), Label: m.Format("Jan"), Year: m.Year(),
+		})
+	}
+	thisMonth := now.Format("2006-01")
+	cutoff := now.AddDate(0, 0, -30).Format("2006-01-02")
+	days := map[string]bool{}
+
+	var timedMinutes, timedMinis int
+	for _, m := range s.data.Models {
+		mins := 0
+		for _, e := range m.Sessions {
+			rep.Sessions++
+			rep.Total += e.Minutes
+			mins += e.Minutes
+			if e.Date != "" {
+				days[e.Date] = true
+			}
+			if len(e.Date) >= 7 {
+				if i, ok := index[e.Date[:7]]; ok {
+					rep.Months[i].Minutes += e.Minutes
+					rep.Months[i].Sessions++
+				}
+				if e.Date[:7] == thisMonth {
+					rep.ThisMonth += e.Minutes
+				}
+			}
+			if e.Date >= cutoff {
+				rep.Last30 += e.Minutes
+			}
+		}
+		if mins == 0 {
+			continue
+		}
+		total, _ := m.Minis()
+		timedMinutes += mins
+		timedMinis += total
+		rep.Busiest = append(rep.Busiest, MiniTime{
+			ID: m.ID, Name: m.Name, Minutes: mins, Count: total,
+			PerMini: mins / total,
+		})
+	}
+
+	rep.Days = len(days)
+	if rep.Sessions > 0 {
+		rep.PerSession = rep.Total / rep.Sessions
+	}
+	// Averaged over the minis that have time against them, not the whole
+	// collection: a shelf of untouched boxes would otherwise drag the figure
+	// towards zero and make every estimate from it useless.
+	if timedMinis > 0 {
+		rep.PerMini = timedMinutes / timedMinis
+	}
+	sort.SliceStable(rep.Busiest, func(i, j int) bool {
+		if rep.Busiest[i].Minutes != rep.Busiest[j].Minutes {
+			return rep.Busiest[i].Minutes > rep.Busiest[j].Minutes
+		}
+		return strings.ToLower(rep.Busiest[i].Name) < strings.ToLower(rep.Busiest[j].Name)
+	})
+	if len(rep.Busiest) > 8 {
+		rep.Busiest = rep.Busiest[:8]
+	}
+	return rep
+}
+
+// ---------------------------------------------------------------------------
 // Painting sessions
 // ---------------------------------------------------------------------------
 

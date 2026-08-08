@@ -53,18 +53,14 @@ func thumbName(file string) string {
 // include webp and bmp, which the standard library cannot decode, and a photo
 // with no thumbnail simply falls back to the original everywhere it's drawn.
 func makeThumb(dir, file string) (string, error) {
-	raw, err := os.ReadFile(filepath.Join(dir, file))
+	img, turn, err := decodeImage(filepath.Join(dir, file))
 	if err != nil {
 		return "", err
-	}
-	img, _, err := image.Decode(bytes.NewReader(raw))
-	if err != nil {
-		return "", fmt.Errorf("could not read %s as an image: %w", file, err)
 	}
 	// Downscale first and rotate second: orientation is a pure permutation of
 	// pixels, so doing it to the finished thumbnail is a few hundred thousand
 	// moves rather than a few million.
-	small := orient(downscale(img, thumbMax), exifOrientation(raw))
+	small := orient(downscale(img, thumbMax), turn)
 
 	name := thumbName(file)
 	out, err := os.Create(filepath.Join(dir, name))
@@ -76,6 +72,24 @@ func makeThumb(dir, file string) (string, error) {
 		return "", err
 	}
 	return name, nil
+}
+
+// decodeImage reads an image file and returns it alongside the EXIF
+// orientation still to be applied.
+//
+// The two come back apart rather than already combined because orienting
+// moves every pixel: both callers scale first and turn the small result,
+// which is a few hundred thousand moves rather than a few million.
+func decodeImage(path string) (image.Image, int, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, 1, err
+	}
+	img, _, err := image.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return nil, 1, fmt.Errorf("could not read %s as an image: %w", filepath.Base(path), err)
+	}
+	return img, exifOrientation(raw), nil
 }
 
 // sampleCap bounds how many source pixels are averaged into one output pixel.

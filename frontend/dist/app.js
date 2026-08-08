@@ -397,7 +397,7 @@ function initNav() {
 function show(screen) {
   state.screen = screen;
   ({ dashboard: renderDashboard, models: renderModels, paints: renderPaints,
-     wishlist: renderWishlist, tips: renderTips })[screen]();
+     wishlist: renderWishlist, tips: renderTips, time: renderTime })[screen]();
 }
 
 // Landing on a mini from somewhere else - a log entry on the dashboard, a
@@ -691,6 +691,7 @@ async function renderModelDetail(id) {
           ? `<span class="batch">${plural(m.count, "mini")} · ${m.done} painted</span>` : ""}
         <span style="flex:1"></span>
         ${timerBtn}
+        <button class="btn ghost small" id="export" title="Save this mini as a page or a note">Export</button>
         <button class="btn ghost small" id="edit">Edit</button>
       </div>
       ${progressBar(m.done, m.count)}
@@ -707,6 +708,13 @@ async function renderModelDetail(id) {
     </div>`;
 
   $("#edit").onclick = () => modelDialog(m);
+  // The save dialog decides the format: an .html file carries its photos
+  // inside it, an .md file writes them into a folder alongside. Cancelling
+  // comes back with no path and should say nothing at all.
+  $("#export").onclick = async () => {
+    const path = await call(App().ExportMini, m.id);
+    if (path) toast("Exported");
+  };
   // no redraw here: startTimer -> drawTimer -> syncDetailTimer does it
   const startBtn = $("#start-timer");
   if (startBtn) startBtn.onclick = () => startTimer(m.id, m.name);
@@ -801,6 +809,76 @@ async function renderPaints() {
       const p = shown.find(x => x.id === +row.dataset.id);
       if (p) paintDialog(p);
     };
+  });
+}
+
+/* ===================================================================== TIME */
+// The dashboard reports time as one ever-growing total, which stops being
+// interesting the moment it's large. This is the same log asked the questions
+// that actually change: how much this month, how long a mini takes, where the
+// hours went. Every figure here is derived - nothing extra is recorded.
+async function renderTime() {
+  const r = await call(App().TimeReport);
+
+  if (!r.sessions) {
+    setContent(`
+      <div class="page-head"><div><h1>Time at the Desk</h1>
+        <div class="sub">What the painting log adds up to</div></div></div>
+      <div class="card"><div class="empty"><strong>No sessions logged yet.</strong>
+        Open a mini, go to the Painting log tab, and write down what you got
+        done. Add the minutes and this screen fills itself in.</div></div>`);
+    return;
+  }
+
+  const cards = [
+    [duration(r.thisMonth) || "—", "This month", "#2f7d8a"],
+    [duration(r.last30) || "—", "Last 30 days", "#0ea5e9"],
+    [duration(r.total), "All time", STATUS_COLORS["Complete"]],
+    [plural(r.days, "day"), "Days at the desk", "#8b5cf6"],
+    [duration(r.perSession) || "—", "Average session", "#f59e0b"],
+    [duration(r.perMini) || "—", "Average a mini", "#c07b1f"],
+  ].map(([n, l, c]) => `
+    <div class="card stat">
+      <div class="bar" style="background:${c}"></div>
+      <div><div class="n">${n}</div><div class="l">${l}</div></div>
+    </div>`).join("");
+
+  // The tallest month sets the scale. An empty month keeps a sliver of bar so
+  // the year reads as twelve columns rather than a gap with some bars in it.
+  const peak = Math.max(1, ...r.months.map(m => m.minutes));
+  const bars = r.months.map(m => `
+    <div class="col">
+      <div class="val" style="color:${m.minutes ? "var(--text)" : "var(--faint)"}">${
+        duration(m.minutes) || "—"}</div>
+      <div class="bar" style="height:${m.minutes ? Math.max(6, Math.round(m.minutes / peak * 100)) : 2}%;
+           background:${m.minutes ? "#2f7d8a" : "#e3e8ee"}"></div>
+      <div class="lbl">${esc(m.label)}</div>
+    </div>`).join("");
+
+  const busiest = r.busiest.map(b => `
+    <div class="mini-row time-jump" data-model="${b.id}" style="cursor:pointer">
+      <span class="name">${esc(b.name)}${
+        b.count > 1 ? `<span class="qty">×${b.count}</span>` : ""}</span>
+      <span class="date">${b.count > 1 ? `${duration(b.perMini)} a mini · ` : ""}${
+        duration(b.minutes)}</span>
+    </div>`).join("");
+
+  setContent(`
+    <div class="page-head"><div><h1>Time at the Desk</h1>
+      <div class="sub">${plural(r.sessions, "session")} logged across ${
+        plural(r.days, "day")}</div></div></div>
+    <div class="stats">${cards}</div>
+    <div class="card" style="margin-top:16px">
+      <h2>The last twelve months</h2>
+      <div class="chart tall">${bars}</div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h2>Where the hours went</h2><div class="divider"></div>
+      <div style="padding:6px 0 10px">${busiest}</div>
+    </div>`);
+
+  content().querySelectorAll(".time-jump").forEach(el => {
+    el.onclick = () => jumpToMini(+el.dataset.model);
   });
 }
 

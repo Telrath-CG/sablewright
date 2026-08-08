@@ -102,6 +102,21 @@ own collection can produce: paints recorded on a mini that you don't own,
 because you borrowed them, used them at a club, or ran the pot dry. *Got it*
 ticks a paint off, adding it to the rack and taking it off the list in one go.
 
+**Time at the Desk** — the painting log added up: this month, the last thirty
+days, all time, and how many separate days you've actually sat down. A bar per
+month for the last year, the average session, and the average time a *mini*
+takes — which is where the batch counts earn their keep, since three hours
+across a squad of ten is eighteen minutes a mini, and that's the figure that
+tells you whether the next squad is an evening or a fortnight. Everything here
+is worked out from sessions you've already logged; nothing extra is recorded.
+
+**Export** — *Export* on a mini writes it out as a file to show someone: an
+`.html` page with the photos embedded, which opens in any browser and prints
+to PDF, or an `.md` note for a forum or club post with the photos copied into
+a folder beside it. The save dialog's file type decides which. This is not a
+backup — it's the finished article, its paints, and the log of how it got
+there.
+
 **Technique Notes** — recipes and methods, searchable by title, body or tag.
 A note can carry the paints it calls for, picked from the rack the same way a
 mini's are, so the recipe shows real swatches and the paint knows which

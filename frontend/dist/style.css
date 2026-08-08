@@ -394,6 +394,11 @@ select:focus { border-color: var(--accent); }
 .chart .val { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
 .chart .bar { width: 100%; border-radius: 5px 5px 0 0; min-height: 4px; }
 .chart .lbl { color: var(--muted); font-size: 12px; padding: 8px 0 14px; }
+/* Twelve columns rather than six, and each value is "1h 35m" rather than a
+   number, so the year needs the height and the room between columns. */
+.chart.tall { height: 190px; gap: 8px; }
+.chart.tall .val { font-size: 11px; }
+.chart.tall .lbl { font-size: 11px; }
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
 .mini-row {
