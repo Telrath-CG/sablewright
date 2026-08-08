@@ -394,6 +394,11 @@ select:focus { border-color: var(--accent); }
 .chart .val { font-size: 12px; font-weight: 700; margin-bottom: 6px; }
 .chart .bar { width: 100%; border-radius: 5px 5px 0 0; min-height: 4px; }
 .chart .lbl { color: var(--muted); font-size: 12px; padding: 8px 0 14px; }
+/* Twelve columns rather than six, and each value is "1h 35m" rather than a
+   number, so the year needs the height and the room between columns. */
+.chart.tall { height: 190px; gap: 8px; }
+.chart.tall .val { font-size: 11px; }
+.chart.tall .lbl { font-size: 11px; }
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
 .mini-row {
@@ -430,7 +435,106 @@ select:focus { border-color: var(--accent); }
 .row.sel { background: var(--sel); border-left-color: var(--accent); }
 .row .nm { font-size: 14px; }
 .row.sel .nm { font-weight: 600; }
-.row .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+/* System, faction and project all land on this line, so it has to give up
+   gracefully rather than wrapping the row to three lines. */
+.row .sub {
+  color: var(--muted); font-size: 12px; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+/* The cover holds its square whether or not a photo has been added, so the
+   names stay in one column instead of stepping in and out of line. */
+.row .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.row .txt { min-width: 0; flex: 1; }
+.row .cover {
+  flex: 0 0 40px; width: 40px; height: 40px; border-radius: 6px;
+  object-fit: cover; background: var(--input-bg); border: 1px solid var(--border);
+}
+.row .cover.blank {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--faint); font-size: 15px;
+}
+
+/* A batch says its size beside the name and its progress under it, so the
+   two read as one line of information rather than another column. */
+.qty {
+  color: var(--muted); font-size: 12px; font-weight: 600; margin-left: 6px;
+}
+.progress {
+  position: relative; height: 12px; margin-top: 5px; border-radius: 6px;
+  background: var(--input-bg); border: 1px solid var(--border); overflow: hidden;
+}
+.progress .fill {
+  position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: .75;
+}
+.progress span {
+  position: relative; display: block; text-align: center; font-size: 9px;
+  line-height: 12px; font-weight: 700; color: var(--text);
+}
+.detail .progress { height: 14px; margin: 8px 0 2px; }
+.detail .progress span { line-height: 14px; font-size: 10px; }
+.detail .batch { color: var(--muted); font-size: 12px; }
+
+/* Where a paint turns up: the minis it's on and the recipes that call for
+   it, each one a way into that record rather than a count of them. */
+.links { display: flex; flex-wrap: wrap; gap: 6px; }
+.links .link {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  background: var(--input-bg); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 10px; font-size: 12px;
+}
+.links .link:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ------------------------------------------------------------- projects */
+/* Two columns while there's room for them: a project card is a paragraph of
+   figures, not a table, and a full-width one is mostly whitespace. */
+.project-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 16px; align-items: start;
+}
+.project { padding: 16px 18px 14px; }
+.phead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.phead h2 { margin: 0; padding: 0; font-size: 17px; }
+.phead .spacer { flex: 1; }
+.due {
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px;
+}
+/* A week out is worth noticing; past the date is worth not missing. */
+.due.soon { color: #c07b1f; border-color: #c07b1f66; }
+.due.over { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.pstats {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 4px;
+  color: var(--muted); font-size: 13px;
+}
+.pstats strong { color: var(--text); }
+.pnotes { color: var(--muted); font-size: 13px; margin: 10px 0 2px; white-space: pre-wrap; }
+.pfoot { padding-top: 10px; font-size: 13px; }
+.pfoot .open { color: var(--accent); cursor: pointer; }
+.pfoot .open:hover { text-decoration: underline; }
+.project .links .qty { margin-left: 6px; color: var(--faint); }
+
+/* The wishlist is read the way a shop is laid out - by brand, then by the
+   maker's own range - so the group heading carries the brand and each row
+   only has to say which paint it is. */
+.wgroup + .wgroup { margin-top: 6px; }
+.whead {
+  display: flex; align-items: baseline; gap: 8px; padding: 12px 18px 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--faint);
+  text-transform: uppercase;
+}
+.whead span { color: var(--muted); font-weight: 600; letter-spacing: 0; }
+.wrow {
+  display: flex; align-items: center; gap: 10px; padding: 8px 18px;
+  border-top: 1px solid var(--border);
+}
+.wrow:hover { background: var(--hover); }
+.wrow .nm { cursor: pointer; font-size: 14px; }
+.wrow .nm:hover { color: var(--accent); }
+.wrow .code { color: var(--faint); font-size: 11px; }
+.wrow .meta { color: var(--muted); font-size: 12px; flex: 1; }
+.wrow .x { color: var(--danger); cursor: pointer; font-size: 12px; }
+.wrow .btn.small { padding: 4px 10px; font-size: 12px; }
 .row .count { text-align: right; color: var(--muted); }
 .row .star { color: var(--star); }
 
@@ -454,6 +558,13 @@ select:focus { border-color: var(--accent); }
 .photo .ph { display: grid; place-items: center; color: var(--faint); font-size: 22px; }
 .photo .cap { margin-top: 5px; display: flex; align-items: center; gap: 5px; }
 .photo .x { margin-left: auto; color: var(--danger); cursor: pointer; font-size: 12px; }
+/* Picking the cover sits with the photo it applies to rather than in a
+   dropdown elsewhere, and the filled star is the one currently standing in
+   for the mini out in the list. */
+.photo .pick { margin-left: auto; color: var(--faint); cursor: pointer; font-size: 12px; }
+.photo .pick.on { color: var(--star); }
+.photo .pick + .x { margin-left: 0; }
+.photo .is-cover { color: var(--star); font-size: 11px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .chip {
@@ -642,6 +753,13 @@ select:focus { border-color: var(--accent); }
   position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
   background: var(--toast-bg); color: var(--toast-text); padding: 11px 20px; border-radius: 9px;
   font-size: 13px; box-shadow: var(--shadow); z-index: 80;
+}
+/* The one action a toast can carry, which is how a delete offers to undo
+   itself before the message goes. */
+.toast .undo {
+  margin-left: 14px; background: none; border: 0; cursor: pointer;
+  color: var(--toast-text); font: inherit; font-weight: 700;
+  text-decoration: underline; padding: 0;
 }
 
 /* narrow windows: let the split stack rather than clip */

@@ -60,6 +60,15 @@ recently, and your latest painting sessions.
 double-click to edit. Each mini holds a status, the paints used, technique
 notes, photos, and a painting log.
 
+**Projects** — a project is whatever your minis say they belong to. Put a
+project name on a mini — an army, a tournament list, a boxed game — and it
+appears here with everything else that shares it: how many of its minis are
+painted, the hours logged against it, what to pick up next, and a deadline if
+you set one. Projects sort by deadline, soonest first. Nothing has to be
+created before it can be typed, and nothing is left behind when the last mini
+using a name is renamed. *Edit* sets the deadline and notes, renames the
+project across every mini at once, or ungroups them without deleting anything.
+
 **Painting log** — the point of this is to record what actually happened at the
 desk. Open a mini, go to the *Painting log* tab, and add a dated entry with an
 optional number of minutes: *"Nuln Oil recess shading done, started edge
@@ -92,13 +101,46 @@ and range fields are free text with autocomplete, so any paint from any maker ca
 be added, and deleting one is permanent unless you ask for the built-in set back.
 
 Paints start out unowned — tick "I own this paint" as you buy them, and the
-dashboard counts what's actually on your desk.
+dashboard counts what's actually on your desk. Opening a paint shows where it
+turns up — every mini it's recorded on and every recipe that calls for it —
+and each one clicks through to that record.
+
+**Wishlist** — the shopping list, grouped by brand the way a shop is, with
+*Copy list* to take it out of the house. Underneath it sits the list only your
+own collection can produce: paints recorded on a mini that you don't own,
+because you borrowed them, used them at a club, or ran the pot dry. *Got it*
+ticks a paint off, adding it to the rack and taking it off the list in one go.
+
+**Time at the Desk** — the painting log added up: this month, the last thirty
+days, all time, and how many separate days you've actually sat down. A bar per
+month for the last year, the average session, and the average time a *mini*
+takes — which is where the batch counts earn their keep, since three hours
+across a squad of ten is eighteen minutes a mini, and that's the figure that
+tells you whether the next squad is an evening or a fortnight. Everything here
+is worked out from sessions you've already logged; nothing extra is recorded.
+
+**Export** — *Export* on a mini writes it out as a file to show someone: an
+`.html` page with the photos embedded, which opens in any browser and prints
+to PDF, or an `.md` note for a forum or club post with the photos copied into
+a folder beside it. The save dialog's file type decides which. This is not a
+backup — it's the finished article, its paints, and the log of how it got
+there.
 
 **Technique Notes** — recipes and methods, searchable by title, body or tag.
+A note can carry the paints it calls for, picked from the rack the same way a
+mini's are, so the recipe shows real swatches and the paint knows which
+recipes use it.
 
 **Photos** — added through a native file picker and *copied* into the app's own
 folder, so moving or deleting the originals later doesn't break anything.
 Click a photo to open it full size.
+
+A thumbnail is generated on import and is what the app actually draws, so a
+mini with a dozen progress shots costs a fraction of the memory it used to;
+the original is never touched and is still what opens when you click. The star
+on a photo makes it that mini's cover — the shot shown beside it in the list.
+Choose nothing and the newest final photo stands in, falling back to the
+newest progress shot.
 
 ---
 
@@ -118,6 +160,21 @@ opens it. Nothing is uploaded anywhere; the app makes no network connections.
 **Back it up** with *Backup data* in the sidebar — one zip containing the
 database and every photo. *Import backup* restores one, which is also how you
 move to a new computer.
+
+On top of that the app copies `collection.json` into a `backups` folder every
+time it starts, keeping the last three. That's for the failure you only notice
+afterwards — a bad import, a mass edit, a file that stopped being readable.
+Only the database is copied, since the photos are large and don't change;
+a manual backup is still the one that carries everything.
+
+**Deleting a mini** puts it in the trash for 30 days rather than destroying
+it, and the toast offers *Undo* on the spot. Notes and a status can be typed
+again; a photo of a mini part-painted three months ago can't be retaken. It
+leaves the app immediately either way — nothing reads the trash — and after
+30 days it and its photos go for good.
+
+**Keyboard** — on the Models screen, ↑ and ↓ walk the list and Enter opens
+the highlighted mini for editing.
 
 ### Why JSON and not SQLite
 
