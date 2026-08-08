@@ -40,12 +40,21 @@ type Session struct {
 	Notes   string `json:"notes"`
 }
 
+// Model is one entry in the collection, which is not the same thing as one
+// miniature. A squad is painted as a single job - same paints, same evening,
+// one line in the log - so it is one entry carrying the number of minis in it
+// rather than ten near-identical records. Count says how many, Done says how
+// many of them are finished, and Status describes the rest. A character who
+// deserves his own photos and his own log simply gets his own entry, which is
+// how a painter thinks of him anyway.
 type Model struct {
 	ID         int       `json:"id"`
 	Name       string    `json:"name"`
 	GameSystem string    `json:"gameSystem"`
 	Faction    string    `json:"faction"`
 	Status     string    `json:"status"`
+	Count      int       `json:"count"` // minis in this entry; at least 1
+	Done       int       `json:"done"`  // how many of them are finished
 	Favorite   bool      `json:"favorite"`
 	Notes      string    `json:"notes"`
 	Started    string    `json:"started"`
@@ -54,6 +63,32 @@ type Model struct {
 	PaintIDs   []int     `json:"paintIds"`
 	Photos     []Photo   `json:"photos"`
 	Sessions   []Session `json:"sessions"`
+}
+
+// finished is true of the statuses that mean the painting is over. Display is
+// a finished mini that has somewhere to stand, not a stage on the way there.
+func finished(status string) bool { return status == "Complete" || status == "Display" }
+
+// Minis reports how many miniatures this entry stands for and how many of
+// them are painted, with both clamped into sense. A file written by an older
+// build has no count at all, and one edited by hand can say anything, so
+// every reader goes through here rather than trusting the two fields.
+func (m Model) Minis() (total, done int) {
+	total = m.Count
+	if total < 1 {
+		total = 1
+	}
+	done = m.Done
+	if finished(m.Status) {
+		done = total
+	}
+	if done < 0 {
+		done = 0
+	}
+	if done > total {
+		done = total
+	}
+	return total, done
 }
 
 // TotalMinutes adds up recorded session time for this mini.
@@ -115,7 +150,8 @@ var Statuses = []string{"Backlog", "Assembled", "Primed", "In Progress", "Comple
 //	   the built-in paint library
 //	3  the library gained the Citadel Air range
 //	4  the library gained Kimera Kolors, Pure and Signature Blends alike
-const dataVersion = 4
+//	5  a model entry carries how many minis it is, and how many are finished
+const dataVersion = 5
 
 func today() string { return time.Now().Format("2006-01-02") }
 
@@ -200,6 +236,14 @@ func (s *Store) migrate() {
 	for i, p := range s.data.Paints {
 		if to, ok := RenamedBrands[p.Brand]; ok {
 			s.data.Paints[i].Brand = to
+		}
+	}
+	// Every entry written before counts existed is one mini. A zero here
+	// would otherwise erase the whole collection from the dashboard, which
+	// counts minis by adding these up.
+	for i, m := range s.data.Models {
+		if m.Count < 1 {
+			s.data.Models[i].Count = 1
 		}
 	}
 	s.addLibraryPaints()
@@ -304,6 +348,9 @@ func (s *Store) Models(search, status, sortBy string, desc bool) []Model {
 				continue
 			}
 		}
+		// The list draws "x10" and a 6-of-10 bar straight off these, so hand
+		// them over already clamped rather than making the frontend guess.
+		m.Count, m.Done = m.Minis()
 		out = append(out, m)
 	}
 	statusRank := func(st string) int {
@@ -365,6 +412,7 @@ func (s *Store) ModelByID(id int) (Model, bool) {
 	defer s.mu.RUnlock()
 	for _, m := range s.data.Models {
 		if m.ID == id {
+			m.Count, m.Done = m.Minis()
 			return m, true
 		}
 	}
@@ -382,6 +430,20 @@ func (s *Store) SaveModel(m Model) (Model, error) {
 	}
 	if m.Sessions == nil {
 		m.Sessions = []Session{}
+	}
+	m.Count, m.Done = m.Minis()
+	// Calling an entry finished is the one moment the app can fill the rest
+	// in without guessing: every mini in it is painted, and it was painted by
+	// today at the latest. Minis() has already pulled Done up to Count.
+	//
+	// Neither is ever undone. Moving an entry back off Complete - a repaint,
+	// a status fixed after a misclick - keeps the date it was finished on and
+	// the count that was painted, because the alternative is an app that
+	// quietly destroys a record every time a dropdown is corrected. Nothing
+	// reads a finish date on an unfinished entry, so a stale one is harmless
+	// where a lost one is not.
+	if finished(m.Status) && m.Completed == "" {
+		m.Completed = today()
 	}
 	if m.ID == 0 {
 		m.ID = s.nextID()
@@ -839,13 +901,26 @@ func (s *Store) Stats() Stats {
 		st.ByStatus[v] = 0
 	}
 	for _, m := range s.data.Models {
-		st.Models++
-		st.ByStatus[m.Status]++
-		switch m.Status {
-		case "In Progress":
-			st.InProg++
-		case "Complete", "Display":
-			st.Finished++
+		// Counted in minis rather than in entries: a squad of ten is ten
+		// minis on the shelf, and saying "1" for it made every number on this
+		// screen an undercount of the collection it claims to describe.
+		//
+		// A part-painted batch is split between the two bars it actually
+		// straddles - six finished marines under Complete, four still under
+		// In Progress - so the chart and the finished card can never disagree
+		// about the same six marines. A finished entry is never split; it
+		// counts whole under its own status, so Display keeps its bar.
+		total, done := m.Minis()
+		st.Models += total
+		st.Finished += done
+		if finished(m.Status) {
+			st.ByStatus[m.Status] += total
+		} else {
+			st.ByStatus["Complete"] += done
+			st.ByStatus[m.Status] += total - done
+			if m.Status == "In Progress" {
+				st.InProg += total - done
+			}
 		}
 		for _, e := range m.Sessions {
 			st.Sessions++

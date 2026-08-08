@@ -112,6 +112,30 @@ function prettyDate(iso) {
 
 function plural(n, one, many) { return `${n} ${n === 1 ? one : (many || one + "s")}`; }
 
+// Counts arrive from text inputs rather than number spinners, so that a
+// half-typed or pasted value is never silently mangled on the way in.
+function intOf(value, fallback) {
+  const n = parseInt(String(value == null ? "" : value).replace(/[^0-9]/g, ""), 10);
+  return isNaN(n) ? fallback : n;
+}
+
+// A squad is one row, so the row has to show how far through it is. Nothing
+// is drawn for a single mini: a 0-of-1 bar beside a status badge already
+// saying as much is noise.
+function progressBar(done, total) {
+  if (!(total > 1)) return "";
+  return `<div class="progress" title="${done} of ${total} painted">
+    <div class="fill" style="width:${Math.round((done / total) * 100)}%"></div>
+    <span>${done}/${total}</span>
+  </div>`;
+}
+
+// The collection is measured in minis, and the entries are how they're filed.
+// The two only need saying apart once a batch makes them differ.
+function miniCount(models) {
+  return models.reduce((n, m) => n + (m.count || 1), 0);
+}
+
 // 95 -> "1h 35m", 60 -> "1h", 0 -> ""
 function duration(mins) {
   if (!mins) return "";
@@ -436,13 +460,21 @@ async function renderModels() {
   const rows = models.length ? models.map(m => `
     <div class="row${m.id === f.selected ? " sel" : ""}" data-id="${m.id}">
       <div>
-        <div class="nm">${esc(m.name)}</div>
+        <div class="nm">${esc(m.name)}${
+          m.count > 1 ? `<span class="qty">×${m.count}</span>` : ""}</div>
         <div class="sub">${esc([m.gameSystem, m.faction].filter(Boolean).join(" · ") || "—")}</div>
+        ${progressBar(m.done, m.count)}
       </div>
       <div>${badge(m.status)}</div>
       <div class="count">${(m.paintIds || []).length}${m.favorite ? ' <span class="star">★</span>' : ""}</div>
     </div>`).join("")
     : `<div class="empty"><strong>No minis yet.</strong>Click “+ Add Mini” to start your collection.</div>`;
+
+  // Entries and minis are the same number until a batch splits them, and the
+  // heading only spends words on the difference once there is one.
+  const minis = miniCount(models);
+  const tally = minis === models.length ? plural(minis, "mini")
+    : `${plural(minis, "mini")} in ${plural(models.length, "entry", "entries")}`;
 
   // The arrow follows the values, not the flag: A→Z and in-progress-first
   // both point up, while "most paints first" points down unreversed.
@@ -456,7 +488,7 @@ async function renderModels() {
 
   setContent(`
     <div class="page-head">
-      <div><h1>Models</h1><div class="sub">Your collection — ${plural(models.length, "mini")}</div></div>
+      <div><h1>Models</h1><div class="sub">Your collection — ${tally}</div></div>
       <div class="spacer"></div>
       <button class="btn" id="add-model">+&nbsp; Add Mini</button>
     </div>
@@ -584,10 +616,13 @@ async function renderModelDetail(id) {
         <button class="star-btn${m.favorite ? " on" : ""}" id="fav" title="Favourite">${m.favorite ? "★" : "☆"}</button>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
-        ${badge(m.status)}<span style="flex:1"></span>
+        ${badge(m.status)}${m.count > 1
+          ? `<span class="batch">${plural(m.count, "mini")} · ${m.done} painted</span>` : ""}
+        <span style="flex:1"></span>
         ${timerBtn}
         <button class="btn ghost small" id="edit">Edit</button>
       </div>
+      ${progressBar(m.done, m.count)}
       <div class="section">PHOTOS</div><div class="photos">${photos}</div>
       <div class="section">PAINTS USED</div>${chips}
       <div class="section">NOTES</div>${noteHtml}
@@ -772,7 +807,8 @@ async function modelDialog(model, opts = {}) {
   const isNew = !model;
   let m = model ? { ...model } : {
     id: 0, name: "", gameSystem: "", faction: "", status: "Backlog",
-    favorite: false, notes: "", started: new Date().toISOString().slice(0, 10),
+    count: 1, done: 0, favorite: false, notes: "",
+    started: new Date().toISOString().slice(0, 10),
     completed: "", paintIds: [], photos: [],
   };
   let tab = opts.tab || "details";
@@ -809,6 +845,16 @@ async function modelDialog(model, opts = {}) {
       </div>
       <div class="grid3">
         <div class="field"><label>Status</label>${selectBox("f-status", STATUSES, m.status)}</div>
+        <div class="field"><label>How many minis</label>
+          <input type="text" id="f-count" inputmode="numeric" value="${m.count || 1}">
+          <div class="hint">A squad is one entry — say how many it holds.</div>
+        </div>
+        <div class="field"><label>Painted so far</label>
+          <input type="text" id="f-painted" inputmode="numeric" value="${m.done || 0}">
+          <div class="hint">Filled in for you when this goes Complete.</div>
+        </div>
+      </div>
+      <div class="grid2">
         <div class="field"><label>Started</label>
           <input type="date" id="f-started" value="${esc(m.started)}"></div>
         <div class="field"><label>Finished</label>
@@ -1018,6 +1064,8 @@ async function modelDialog(model, opts = {}) {
       m.gameSystem = g("f-sys").trim();
       m.faction = g("f-fac").trim();
       m.status = g("f-status");
+      m.count = intOf(g("f-count"), 1);
+      m.done = intOf(g("f-painted"), 0);
       m.started = g("f-started");
       m.completed = g("f-done");
       m.notes = g("f-notes");
@@ -1043,11 +1091,10 @@ async function modelDialog(model, opts = {}) {
     const notes = $("#s-notes").value.trim();
     if (!notes) { toast("Write a line about what you did this session"); return; }
     if (!m.id && !(await ensureSaved())) return;
-    const mins = parseInt($("#s-mins").value.replace(/[^0-9]/g, ""), 10);
     const updated = await call(App().SaveSession, m.id, {
       id: editSession.id || 0,
       date: $("#s-date").value || todayISO(),
-      minutes: isNaN(mins) ? 0 : mins,
+      minutes: intOf($("#s-mins").value, 0),
       notes,
     });
     if (updated) {
