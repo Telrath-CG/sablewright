@@ -27,6 +27,15 @@ const TIP_COLORS = {
   "Tools": "#64748b", "Other": "#6b7280",
 };
 
+// The models list can be reordered from the picker or by clicking a column
+// header. Each ordering runs one way naturally - names climb A→Z, everything
+// else reads from the top down - and asc records which, so the header arrow
+// can point at the values rather than at the reversal flag.
+const MODEL_SORTS = ["Status", "Name", "Paints", "Recent", "Favourites"];
+const SORT_ASC = { Status: true, Name: true, Paints: false, Recent: false, Favourites: false };
+// The three columns the list draws, in order, and the sort each one clicks to.
+const MODEL_COLUMNS = [["Name", "NAME", ""], ["Status", "STATUS", ""], ["Paints", "PAINTS", "r"]];
+
 const MAGNIFIER =
   '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">' +
   '<circle cx="7" cy="7" r="5" fill="none" stroke="#98a2ae" stroke-width="2"/>' +
@@ -34,7 +43,7 @@ const MAGNIFIER =
 
 const state = {
   screen: "dashboard",
-  models: { search: "", status: "All", sort: "Recent", selected: null },
+  models: { search: "", status: "All", sort: "Status", desc: false, selected: null },
   paints: { search: "", type: "All types", brand: "All brands",
             range: "All ranges", stock: "All" },
   tips:   { search: "", category: "All" },
@@ -143,9 +152,12 @@ function searchBox(id, placeholder, value) {
   </div>`;
 }
 
-function selectBox(id, options, value) {
+// prefix labels the choices without becoming part of them: "Sort: Status" in
+// a bar that already holds a Status filter, while the value stays "Status".
+function selectBox(id, options, value, prefix = "") {
   return `<select id="${id}">` +
-    options.map(o => `<option${o === value ? " selected" : ""}>${esc(o)}</option>`).join("") +
+    options.map(o => `<option value="${esc(o)}"${o === value ? " selected" : ""}>${
+      esc(prefix + o)}</option>`).join("") +
     `</select>`;
 }
 
@@ -415,7 +427,8 @@ async function renderDashboard() {
 /* =================================================================== MODELS */
 async function renderModels() {
   const f = state.models;
-  const models = await call(App().ListModels, { search: f.search, status: f.status, sort: f.sort });
+  const models = await call(App().ListModels,
+    { search: f.search, status: f.status, sort: f.sort, desc: f.desc });
 
   if (models.length && !models.some(m => m.id === f.selected)) f.selected = models[0].id;
   if (!models.length) f.selected = null;
@@ -431,6 +444,16 @@ async function renderModels() {
     </div>`).join("")
     : `<div class="empty"><strong>No minis yet.</strong>Click “+ Add Mini” to start your collection.</div>`;
 
+  // The arrow follows the values, not the flag: A→Z and in-progress-first
+  // both point up, while "most paints first" points down unreversed.
+  const head = MODEL_COLUMNS.map(([key, label, cls]) => {
+    const on = f.sort === key;
+    const up = SORT_ASC[key] !== f.desc;
+    const arrow = on ? `<span class="arrow">${up ? "▲" : "▼"}</span>` : "";
+    return `<div class="sortable${cls ? " " + cls : ""}${on ? " on" : ""}"
+      data-sort="${key}" title="Sort by ${label.toLowerCase()}">${label}${arrow}</div>`;
+  }).join("");
+
   setContent(`
     <div class="page-head">
       <div><h1>Models</h1><div class="sub">Your collection — ${plural(models.length, "mini")}</div></div>
@@ -440,11 +463,11 @@ async function renderModels() {
     <div class="filters">
       ${searchBox("m-search", "Search minis…", f.search)}
       ${selectBox("m-status", ["All", ...STATUSES], f.status)}
-      ${selectBox("m-sort", ["Recent", "Name", "Status", "Favourites"], f.sort)}
+      ${selectBox("m-sort", MODEL_SORTS, f.sort, "Sort: ")}
     </div>
     <div class="split">
       <div class="card list-pane">
-        <div class="list-head"><div>NAME</div><div>STATUS</div><div class="r">PAINTS</div></div>
+        <div class="list-head" id="m-head">${head}</div>
         <div class="divider"></div>
         <div class="rows" id="m-rows">${rows}</div>
       </div>
@@ -454,8 +477,20 @@ async function renderModels() {
   const search = $("#m-search");
   search.oninput = debounce(() => { f.search = search.value; renderModels(); }, 180);
   $("#m-status").onchange = e => { f.status = e.target.value; renderModels(); };
-  $("#m-sort").onchange = e => { f.sort = e.target.value; renderModels(); };
+  // Picking an ordering fresh starts it the way round it's meant to be read.
+  $("#m-sort").onchange = e => { f.sort = e.target.value; f.desc = false; renderModels(); };
   $("#add-model").onclick = () => modelDialog(null);
+
+  // Clicking the column already sorted reverses it; clicking a different one
+  // moves to it in its own natural direction rather than inheriting the last
+  // column's, so a reversed name sort doesn't hand you the least-painted mini.
+  $("#m-head").addEventListener("click", e => {
+    const col = e.target.closest("[data-sort]");
+    if (!col) return;
+    if (f.sort === col.dataset.sort) f.desc = !f.desc;
+    else { f.sort = col.dataset.sort; f.desc = false; }
+    renderModels();
+  });
 
   $("#m-rows").addEventListener("click", e => {
     const row = e.target.closest(".row");
