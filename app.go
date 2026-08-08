@@ -30,11 +30,20 @@ func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// Catch up the thumbnails for photos that predate them. Off the startup
-	// path deliberately: a collection with hundreds of photos would otherwise
-	// hold the window shut while it decoded every one of them, and until each
-	// thumbnail lands the UI simply draws the original.
-	go a.store.BackfillThumbs()
+	// Both of these are housekeeping the user never asked for, so neither is
+	// allowed to hold the window shut. A collection with hundreds of photos
+	// would take a noticeable while to catch its thumbnails up, and until
+	// each one lands the UI simply draws the original.
+	go func() {
+		now := time.Now()
+		if err := a.store.SnapshotOnStartup(now.Format("20060102-150405")); err != nil {
+			// A missing or unreadable file is what the snapshot is for, not
+			// something to interrupt the user over on the way in.
+			_ = err
+		}
+		a.store.PurgeTrash(now)
+		a.store.BackfillThumbs()
+	}()
 }
 
 // ---------------------------------------------------------------------------
@@ -232,7 +241,17 @@ func (a *App) SaveModel(m Model) (Model, error) {
 	return a.store.SaveModel(m)
 }
 
+// DeleteModel moves a mini to the trash, where UndoDeleteModel can fetch it
+// back for the next month. The screen offers that as an Undo on the toast.
 func (a *App) DeleteModel(id int) error { return a.store.DeleteModel(id) }
+
+func (a *App) UndoDeleteModel(id int) (*Model, error) {
+	m, err := a.store.RestoreModel(id)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
 
 // SaveSession adds or updates one entry in a mini's painting log.
 func (a *App) SaveSession(modelID int, s Session) (*Model, error) {

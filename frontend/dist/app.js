@@ -165,12 +165,22 @@ function duration(mins) {
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 let toastTimer = null;
-function toast(msg) {
+// A toast can carry one action, which is how a delete offers to undo itself.
+// It stays up longer when it does: the message is no longer just telling you
+// what happened, it's waiting to hear whether you meant it.
+function toast(msg, action) {
   const t = $("#toast");
   t.textContent = msg;
+  if (action) {
+    const btn = document.createElement("button");
+    btn.className = "undo";
+    btn.textContent = action.label;
+    btn.onclick = () => { t.hidden = true; action.run(); };
+    t.appendChild(btn);
+  }
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { t.hidden = true; }, action ? 8000 : 2600);
 }
 
 // Every backend call goes through here so a failure surfaces as a message
@@ -392,6 +402,42 @@ function initNav() {
     if (ok) { clearTimer(); toast("Backup imported"); show(state.screen); }
   };
   $("#btn-folder").onclick = () => call(App().OpenDataFolder);
+}
+
+/* ------------------------------------------------------------- keyboard */
+// Arrow keys walk the models list and Enter opens what's highlighted, so a
+// pass through the collection doesn't have to be done with the mouse.
+//
+// One listener on the document, registered once, rather than one per render:
+// the list is rebuilt on every keystroke in the search box, and handlers
+// attached to it would be attached again with it.
+function initKeys() {
+  document.addEventListener("keydown", e => {
+    if (state.screen !== "models") return;
+    if (!$("#modal-backdrop").hidden) return; // the dialog owns the keyboard
+    // Typing in the search box means arrows move the caret, not the list.
+    const el = document.activeElement;
+    if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+
+    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+    if (!step && e.key !== "Enter") return;
+
+    const rows = [...document.querySelectorAll("#m-rows .row")];
+    if (!rows.length) return;
+    const at = rows.findIndex(r => +r.dataset.id === state.models.selected);
+    e.preventDefault();
+    if (!step) { openModel(state.models.selected); return; }
+
+    // A first press with nothing selected starts at the top rather than
+    // jumping to whichever end the arrow happens to point away from.
+    const next = rows[at < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, at + step))];
+    state.models.selected = +next.dataset.id;
+    rows.forEach(r => r.classList.toggle("sel", r === next));
+    next.scrollIntoView({ block: "nearest" });
+    // Only the pane is redrawn: rebuilding the list would throw away the
+    // rows this is walking, and held arrows would fight the round trip.
+    renderModelDetail(state.models.selected);
+  });
 }
 
 function show(screen) {
@@ -1285,12 +1331,20 @@ async function modelDialog(model, opts = {}) {
     const del = $("#del");
     if (del) del.onclick = async () => {
       const ok = await call(App().Confirm, "Delete mini",
-        `Delete “${m.name}” and its photos?\nThis can't be undone.`, "Delete");
+        `Delete “${m.name}”?\nIt goes to the trash for 30 days, photos and all.`,
+        "Delete");
       if (!ok) return;
-      await call(App().DeleteModel, m.id);
+      const gone = m.id, name = m.name;
+      await call(App().DeleteModel, gone);
       // Nothing left to log the session against.
-      if (timer.modelId === m.id) clearTimer();
+      if (timer.modelId === gone) clearTimer();
       closeModal(); state.models.selected = null; show(state.screen);
+      toast(`Deleted “${name}”`, { label: "Undo", run: async () => {
+        await call(App().UndoDeleteModel, gone);
+        state.models.selected = gone;
+        show(state.screen);
+        toast("Put back");
+      } });
     };
 
     // A tab switch leaves focus on the tab button, so drop the caret somewhere
@@ -1656,6 +1710,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initTheme();
   await ready();
   initNav();
+  initKeys();
   // The build names itself rather than carrying a string the source has to
   // remember to update - the linker stamps it in, so it can't go stale.
   App().Version().then(v => { $("#version").textContent = v; });
