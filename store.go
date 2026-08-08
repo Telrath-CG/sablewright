@@ -180,12 +180,21 @@ type TipRef struct {
 	Category string `json:"category"`
 }
 
+// Trashed is a deleted mini, kept for a while in case the delete was a
+// mistake. Its photos stay where they are on disk until it is purged: they
+// are the part of a mini that cannot be typed back in.
+type Trashed struct {
+	Model   Model  `json:"model"`
+	Deleted string `json:"deleted"` // YYYY-MM-DD
+}
+
 type Data struct {
-	Version int     `json:"version"`
-	NextID  int     `json:"nextId"`
-	Models  []Model `json:"models"`
-	Paints  []Paint `json:"paints"`
-	Tips    []Tip   `json:"tips"`
+	Version int       `json:"version"`
+	NextID  int       `json:"nextId"`
+	Models  []Model   `json:"models"`
+	Paints  []Paint   `json:"paints"`
+	Tips    []Tip     `json:"tips"`
+	Trash   []Trashed `json:"trash"`
 }
 
 // Store owns the data file and guards it with a mutex.
@@ -278,6 +287,56 @@ func (s *Store) load() error {
 		s.migrate()
 		s.data.Version = dataVersion
 		return s.persist()
+	}
+	return nil
+}
+
+// rollingBackups is how many automatic copies of the collection are kept.
+// Three is enough to get past a bad session without noticing it at the time,
+// and small enough that the folder never needs explaining.
+const rollingBackups = 3
+
+// BackupDir is where the automatic copies live, beside the collection they
+// are copies of, so that the Backup zip and a copied data folder both catch
+// them without being told to.
+func (s *Store) BackupDir() string { return filepath.Join(s.dir, "backups") }
+
+// SnapshotOnStartup copies the collection file aside and prunes the old
+// copies. Manual backups exist and are better - they carry the photos - but
+// they are a thing you have to remember, and the failure this guards against
+// is the one you only notice afterwards: a bad import, a mass edit, a file
+// that stopped being readable. Only the JSON is copied, because that is the
+// part that is small, changes constantly, and cannot be recreated.
+func (s *Store) SnapshotOnStartup(stamp string) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	raw, err := os.ReadFile(s.path)
+	if err != nil {
+		return err // nothing saved yet, which is nothing to lose
+	}
+	if err := os.MkdirAll(s.BackupDir(), 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(
+		filepath.Join(s.BackupDir(), "collection-"+stamp+".json"), raw, 0o644); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(s.BackupDir())
+	if err != nil {
+		return err
+	}
+	var made []string
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasPrefix(e.Name(), "collection-") &&
+			strings.HasSuffix(e.Name(), ".json") {
+			made = append(made, e.Name())
+		}
+	}
+	// The names carry a sortable timestamp, so the oldest sort first.
+	sort.Strings(made)
+	for i := 0; i < len(made)-rollingBackups; i++ {
+		_ = os.Remove(filepath.Join(s.BackupDir(), made[i]))
 	}
 	return nil
 }
@@ -574,19 +633,70 @@ func (s *Store) SaveModel(m Model) (Model, error) {
 	return m, s.persist()
 }
 
+// trashDays is how long a deleted mini is kept before its photos go with it.
+// Long enough to notice the mistake and open the app again; short enough that
+// the data folder isn't quietly hoarding a collection you meant to be rid of.
+const trashDays = 30
+
+// DeleteModel moves a mini to the trash rather than destroying it. The photos
+// are the reason: notes and a status can be typed again, and a shot of a mini
+// part-painted three months ago cannot be retaken. Nothing reads the trash,
+// so a deleted mini is gone from the app the moment this returns - it is just
+// recoverable for a month afterwards, or immediately with Undo.
 func (s *Store) DeleteModel(id int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, m := range s.data.Models {
 		if m.ID == id {
-			for _, p := range m.Photos {
-				s.removePhotoFiles(p)
-			}
+			s.data.Trash = append(s.data.Trash, Trashed{Model: m, Deleted: today()})
 			s.data.Models = append(s.data.Models[:i], s.data.Models[i+1:]...)
 			return s.persist()
 		}
 	}
 	return nil
+}
+
+// RestoreModel puts a trashed mini back. Its id comes back with it, so the
+// paints, the log and the photos all still point at the same record.
+func (s *Store) RestoreModel(id int) (Model, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, t := range s.data.Trash {
+		if t.Model.ID != id {
+			continue
+		}
+		s.data.Trash = append(s.data.Trash[:i], s.data.Trash[i+1:]...)
+		s.data.Models = append(s.data.Models, t.Model)
+		return t.Model, s.persist()
+	}
+	return Model{}, fmt.Errorf("that mini is no longer in the trash")
+}
+
+// PurgeTrash destroys what has sat in the trash past its month, photos and
+// all, and reports how many went. Called on the way in rather than on a
+// timer: the app is only ever open for as long as someone is using it.
+func (s *Store) PurgeTrash(now time.Time) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cutoff := now.AddDate(0, 0, -trashDays).Format("2006-01-02")
+	kept := make([]Trashed, 0, len(s.data.Trash))
+	gone := 0
+	for _, t := range s.data.Trash {
+		if t.Deleted > cutoff {
+			kept = append(kept, t)
+			continue
+		}
+		for _, p := range t.Model.Photos {
+			s.removePhotoFiles(p)
+		}
+		gone++
+	}
+	if gone == 0 {
+		return 0
+	}
+	s.data.Trash = kept
+	_ = s.persist()
+	return gone
 }
 
 func (s *Store) AddPhoto(modelID int, srcPath, kind string) (Model, error) {

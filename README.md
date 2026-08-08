@@ -152,6 +152,21 @@ opens it. Nothing is uploaded anywhere; the app makes no network connections.
 database and every photo. *Import backup* restores one, which is also how you
 move to a new computer.
 
+On top of that the app copies `collection.json` into a `backups` folder every
+time it starts, keeping the last three. That's for the failure you only notice
+afterwards — a bad import, a mass edit, a file that stopped being readable.
+Only the database is copied, since the photos are large and don't change;
+a manual backup is still the one that carries everything.
+
+**Deleting a mini** puts it in the trash for 30 days rather than destroying
+it, and the toast offers *Undo* on the spot. Notes and a status can be typed
+again; a photo of a mini part-painted three months ago can't be retaken. It
+leaves the app immediately either way — nothing reads the trash — and after
+30 days it and its photos go for good.
+
+**Keyboard** — on the Models screen, ↑ and ↓ walk the list and Enter opens
+the highlighted mini for editing.
+
 ### Why JSON and not SQLite
 
 A personal collection is hundreds of records, not millions, so a JSON file is
