@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -218,6 +220,93 @@ func TestStatsCountsMinisRatherThanEntries(t *testing.T) {
 		if c.got != c.want {
 			t.Errorf("%s = %d, want %d", c.what, c.got, c.want)
 		}
+	}
+}
+
+// The list draws one shot per mini, and which one it is has to be worth
+// looking at: the finished article beats a shot of bare primer, and an
+// explicit choice beats both.
+func TestCoverPhotoPicksTheShotWorthShowing(t *testing.T) {
+	progress := Photo{ID: 1, File: "a.jpg", Kind: "Progress"}
+	final := Photo{ID: 2, File: "b.jpg", Kind: "Final"}
+	chosen := Photo{ID: 3, File: "c.jpg", Kind: "Progress", Cover: true}
+
+	for _, c := range []struct {
+		what   string
+		photos []Photo
+		want   int
+	}{
+		{"nothing at all", nil, 0},
+		{"only progress shots", []Photo{progress}, 1},
+		{"a final among them", []Photo{progress, final}, 2},
+		{"an explicit choice", []Photo{progress, final, chosen}, 3},
+	} {
+		got := Model{Photos: c.photos}.CoverPhoto()
+		if c.want == 0 {
+			if got != nil {
+				t.Errorf("CoverPhoto() with %s = %v, want nil", c.what, got)
+			}
+			continue
+		}
+		if got == nil || got.ID != c.want {
+			t.Errorf("CoverPhoto() with %s = %v, want photo %d", c.what, got, c.want)
+		}
+	}
+}
+
+// Deleting a photo has to take its thumbnail with it. A generated file with
+// nothing left pointing at it is invisible, so it would accumulate in the
+// data folder forever.
+func TestDeletePhotoRemovesTheThumbnailToo(t *testing.T) {
+	s := newTempStore(t)
+	if err := os.MkdirAll(s.PhotoDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range []string{"m1_1.jpg", "t_m1_1.jpg"} {
+		if err := os.WriteFile(filepath.Join(s.PhotoDir(), n), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.data = Data{NextID: 100, Models: []Model{{ID: 1, Name: "Marine", Photos: []Photo{
+		{ID: 5, File: "m1_1.jpg", Thumb: "t_m1_1.jpg", Kind: "Progress"},
+	}}}}
+
+	if _, err := s.DeletePhoto(1, 5); err != nil {
+		t.Fatalf("DeletePhoto(): %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(s.PhotoDir(), "t_m1_1.jpg")); !os.IsNotExist(err) {
+		t.Error("the thumbnail outlived the photo it was made from")
+	}
+}
+
+// Clicking the star on the photo already chosen is the only way back to
+// letting the app pick, so it has to clear rather than re-set.
+func TestSetCoverPhotoTogglesTheChoiceOff(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100, Models: []Model{{ID: 1, Name: "Marine", Photos: []Photo{
+		{ID: 5, File: "a.jpg", Kind: "Progress"},
+		{ID: 6, File: "b.jpg", Kind: "Final"},
+	}}}}
+
+	if _, err := s.SetCoverPhoto(1, 5); err != nil {
+		t.Fatalf("SetCoverPhoto(): %v", err)
+	}
+	if got := s.data.Models[0].CoverPhoto(); got == nil || got.ID != 5 {
+		t.Fatalf("cover = %v after choosing photo 5", got)
+	}
+
+	m, err := s.SetCoverPhoto(1, 5)
+	if err != nil {
+		t.Fatalf("SetCoverPhoto(): %v", err)
+	}
+	for _, p := range m.Photos {
+		if p.Cover {
+			t.Errorf("photo %d is still marked after choosing it twice", p.ID)
+		}
+	}
+	if got := m.CoverPhoto(); got == nil || got.ID != 6 {
+		t.Errorf("cover fell back to %v, want the final shot", got)
 	}
 }
 

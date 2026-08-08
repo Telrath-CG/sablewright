@@ -130,6 +130,24 @@ function progressBar(done, total) {
   </div>`;
 }
 
+// Tiles draw the generated thumbnail; clicking one opens the original. A
+// photo in a format the decoder couldn't read has no thumbnail and falls
+// back to the full image, which is heavy but never broken.
+function photoSrc(p) {
+  return `/photos/${encodeURIComponent(p.thumb || p.file)}`;
+}
+
+// The shot that stands for a mini in the list: an explicit choice first, then
+// the newest final photo, then the newest progress one. Mirrors CoverPhoto in
+// the store, which is what every other reader of this goes through.
+function coverPhoto(m) {
+  const photos = m.photos || [];
+  return photos.find(p => p.cover)
+    || [...photos].reverse().find(p => p.kind === "Final")
+    || photos[photos.length - 1]
+    || null;
+}
+
 // The collection is measured in minis, and the entries are how they're filed.
 // The two only need saying apart once a batch makes them differ.
 function miniCount(models) {
@@ -457,17 +475,26 @@ async function renderModels() {
   if (models.length && !models.some(m => m.id === f.selected)) f.selected = models[0].id;
   if (!models.length) f.selected = null;
 
-  const rows = models.length ? models.map(m => `
+  // The cover keeps its square whether or not there is a photo in it, so the
+  // names stay in one column instead of stepping in and out.
+  const rows = models.length ? models.map(m => {
+    const cover = coverPhoto(m);
+    return `
     <div class="row${m.id === f.selected ? " sel" : ""}" data-id="${m.id}">
-      <div>
-        <div class="nm">${esc(m.name)}${
-          m.count > 1 ? `<span class="qty">×${m.count}</span>` : ""}</div>
-        <div class="sub">${esc([m.gameSystem, m.faction].filter(Boolean).join(" · ") || "—")}</div>
-        ${progressBar(m.done, m.count)}
+      <div class="who">
+        ${cover ? `<img class="cover" src="${photoSrc(cover)}" alt="" loading="lazy">`
+                : `<span class="cover blank">▤</span>`}
+        <div class="txt">
+          <div class="nm">${esc(m.name)}${
+            m.count > 1 ? `<span class="qty">×${m.count}</span>` : ""}</div>
+          <div class="sub">${esc([m.gameSystem, m.faction].filter(Boolean).join(" · ") || "—")}</div>
+          ${progressBar(m.done, m.count)}
+        </div>
       </div>
       <div>${badge(m.status)}</div>
       <div class="count">${(m.paintIds || []).length}${m.favorite ? ' <span class="star">★</span>' : ""}</div>
-    </div>`).join("")
+    </div>`;
+  }).join("")
     : `<div class="empty"><strong>No minis yet.</strong>Click “+ Add Mini” to start your collection.</div>`;
 
   // Entries and minis are the same number until a batch splits them, and the
@@ -558,9 +585,10 @@ async function renderModelDetail(id) {
 
   const photos = (m.photos || []).length ? m.photos.map(p => `
     <div class="photo">
-      <img src="/photos/${encodeURIComponent(p.file)}" alt="" data-file="${esc(p.file)}">
+      <img src="${photoSrc(p)}" alt="" data-file="${esc(p.file)}" loading="lazy">
       <div class="cap"><span class="badge" style="background:${
-        p.kind === "Final" ? STATUS_COLORS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span></div>
+        p.kind === "Final" ? STATUS_COLORS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span>${
+        p.cover ? `<span class="is-cover" title="Cover shot">★</span>` : ""}</div>
     </div>`).join("")
     : `<div style="color:var(--muted);font-size:13px">No photos yet — add progress shots when you edit this mini.</div>`;
 
@@ -895,10 +923,12 @@ async function modelDialog(model, opts = {}) {
       </div>
       <div class="photos">${(m.photos || []).map(p => `
         <div class="photo">
-          <img src="/photos/${encodeURIComponent(p.file)}" alt="">
+          <img src="${photoSrc(p)}" alt="" loading="lazy">
           <div class="cap">
             <span class="badge" style="background:${
               p.kind === "Final" ? STATUS_COLORS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span>
+            <span class="pick${p.cover ? " on" : ""}" data-cover="${p.id}"
+              title="Use this as the cover in the list">${p.cover ? "★" : "☆"}</span>
             <span class="x" data-photo="${p.id}">✕</span></div>
         </div>`).join("") || `<div style="color:var(--muted);font-size:13px">
           No photos yet. Add a progress shot or a final picture.</div>`}</div>`;
@@ -1048,6 +1078,12 @@ async function modelDialog(model, opts = {}) {
       $("#modal").querySelectorAll(".photo .x").forEach(x => {
         x.onclick = async () => {
           const updated = await call(App().DeletePhoto, m.id, +x.dataset.photo);
+          if (updated) { m.photos = updated.photos || []; render(); }
+        };
+      });
+      $("#modal").querySelectorAll(".photo .pick").forEach(s => {
+        s.onclick = async () => {
+          const updated = await call(App().SetCoverPhoto, m.id, +s.dataset.cover);
           if (updated) { m.photos = updated.photos || []; render(); }
         };
       });
