@@ -464,6 +464,38 @@ select:focus { border-color: var(--accent); }
 .detail .progress { height: 14px; margin: 8px 0 2px; }
 .detail .progress span { line-height: 14px; font-size: 10px; }
 .detail .batch { color: var(--muted); font-size: 12px; }
+
+/* Where a paint turns up: the minis it's on and the recipes that call for
+   it, each one a way into that record rather than a count of them. */
+.links { display: flex; flex-wrap: wrap; gap: 6px; }
+.links .link {
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  background: var(--input-bg); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 10px; font-size: 12px;
+}
+.links .link:hover { border-color: var(--accent); color: var(--accent); }
+
+/* The wishlist is read the way a shop is laid out - by brand, then by the
+   maker's own range - so the group heading carries the brand and each row
+   only has to say which paint it is. */
+.wgroup + .wgroup { margin-top: 6px; }
+.whead {
+  display: flex; align-items: baseline; gap: 8px; padding: 12px 18px 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .04em; color: var(--faint);
+  text-transform: uppercase;
+}
+.whead span { color: var(--muted); font-weight: 600; letter-spacing: 0; }
+.wrow {
+  display: flex; align-items: center; gap: 10px; padding: 8px 18px;
+  border-top: 1px solid var(--border);
+}
+.wrow:hover { background: var(--hover); }
+.wrow .nm { cursor: pointer; font-size: 14px; }
+.wrow .nm:hover { color: var(--accent); }
+.wrow .code { color: var(--faint); font-size: 11px; }
+.wrow .meta { color: var(--muted); font-size: 12px; flex: 1; }
+.wrow .x { color: var(--danger); cursor: pointer; font-size: 12px; }
+.wrow .btn.small { padding: 4px 10px; font-size: 12px; }
 .row .count { text-align: right; color: var(--muted); }
 .row .star { color: var(--star); }
 
