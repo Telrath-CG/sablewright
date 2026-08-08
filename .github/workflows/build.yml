@@ -162,6 +162,39 @@ jobs:
         if: runner.os == 'macOS'
         run: wails build -platform darwin/arm64 -ldflags "${{ env.LDFLAGS }}"
 
+      # The Go linker ad-hoc signs the arm64 executable it produces, but it
+      # signs a *binary*, not a bundle: nothing writes the resource seal at
+      # Contents/_CodeSignature/CodeResources. codesign then reads a signature
+      # that declares sealed resources next to a bundle that has none and
+      # rejects it outright - "code has no resources but signature indicates
+      # they must be present". That is an invalid signature rather than an
+      # untrusted one, and an invalid signature is what makes Gatekeeper say
+      # the download is damaged and should be moved to the Trash.
+      #
+      # The universal build this replaced never hit it: lipo strips the
+      # linker's signature when it fuses the slices, so that bundle was
+      # unsigned rather than half-signed, and unsigned only ever got the
+      # ordinary unidentified-developer prompt.
+      #
+      # Re-signing the whole bundle writes the seal and makes the signature
+      # verify. --sign - is ad-hoc, which is all that is available without a
+      # paid Developer ID, so first launch still needs Open Anyway - but the
+      # app is now openable at all, which it was not before. --identifier
+      # matches CFBundleIdentifier so the signature does not keep the "a.out"
+      # the linker had defaulted to.
+      - name: Sign the app bundle (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          APP=build/bin/Sablewright.app
+          codesign --force --deep --sign - \
+            --identifier "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" \
+            "$APP"
+          # Assert on the verification rather than on codesign's exit code:
+          # this step exists only to stop a bundle that fails --strict from
+          # reaching a release again, so it has to be the thing that is checked.
+          codesign --verify --deep --strict --verbose=2 "$APP"
+
       - name: Install create-dmg (macOS)
         if: runner.os == 'macOS'
         run: brew install create-dmg
@@ -211,6 +244,16 @@ jobs:
           # the NSIS step above does.
           [ -f "$DMG" ] || { echo "No DMG in build/bin - create-dmg failed twice."; exit 1; }
           ls -lh "$DMG"
+
+          # Verifying the bundle before it was imaged only proves the bundle
+          # was fine. Gatekeeper judges the copy the user drags out of the
+          # image, so check that one: mount the finished DMG and re-verify
+          # from there. -nobrowse keeps the runner's Finder out of it, and the
+          # detach is a trap so a failed verify still releases the device.
+          MNT="$(mktemp -d)"
+          hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG"
+          trap 'hdiutil detach "$MNT" -quiet || true' EXIT
+          codesign --verify --deep --strict --verbose=2 "$MNT/Sablewright.app"
 
       # ---- Linux: a bare binary, plus .deb and Arch packages ----
       - name: Build (Linux)
