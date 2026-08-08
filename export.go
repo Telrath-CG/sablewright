@@ -120,7 +120,9 @@ func (a *App) exportHTML(m Model, paints []Paint, path string) error {
 	b.WriteString(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>` + esc(m.Name) + `</title>
+<title>`)
+	b.WriteString(esc(m.Name))
+	b.WriteString(`</title>
 <style>
  :root { color-scheme: light dark; }
  body { font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -181,8 +183,9 @@ func (a *App) exportHTML(m Model, paints []Paint, path string) error {
 		}
 	}
 	if len(shots) > 0 {
-		b.WriteString("<h2>Photos</h2>\n<div class=\"shots\">" +
-			strings.Join(shots, "\n") + "</div>\n")
+		b.WriteString("<h2>Photos</h2>\n<div class=\"shots\">")
+		b.WriteString(strings.Join(shots, "\n"))
+		b.WriteString("</div>\n")
 	}
 
 	if len(paints) > 0 {
@@ -215,7 +218,9 @@ func (a *App) exportHTML(m Model, paints []Paint, path string) error {
 		}
 	}
 
-	b.WriteString("<footer>Exported from Sablewright on " + today() + "</footer>\n</body></html>\n")
+	b.WriteString("<footer>Exported from Sablewright on ")
+	b.WriteString(today())
+	b.WriteString("</footer>\n</body></html>\n")
 	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
 
