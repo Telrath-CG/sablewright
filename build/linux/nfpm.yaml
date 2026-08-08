@@ -15,6 +15,7 @@ section: utils
 priority: optional
 maintainer: Telrath
 homepage: https://github.com/Telrath-CG/sablewright
+license: GPL-3.0-only
 description: |
   Track your miniature painting projects.
   Records what stage each miniature is at, the paints used, a dated log of
@@ -40,6 +41,15 @@ contents:
     dst: /usr/share/icons/hicolor/scalable/apps/sablewright.svg
   - src: ./build/appicon.png
     dst: /usr/share/pixmaps/sablewright.png
+
+  # Both licenses ship with the package rather than only living in the repo.
+  # The GPL asks that a copy travel with the binary, and the embedded paint
+  # data is MIT, whose notice has to reach whoever holds a copy - neither is
+  # satisfied by a file a package installer never sees.
+  - src: ./LICENSE
+    dst: /usr/share/doc/sablewright/LICENSE
+  - src: ./THIRD-PARTY-NOTICES.md
+    dst: /usr/share/doc/sablewright/THIRD-PARTY-NOTICES.md
 
 overrides:
   deb:
