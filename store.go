@@ -280,7 +280,16 @@ func (s *Store) nextID() int {
 // Models
 // ---------------------------------------------------------------------------
 
-func (s *Store) Models(search, status, sortBy string) []Model {
+// workbenchOrder ranks statuses by how likely that mini is to be picked up
+// next, which is not the pipeline order Statuses lists them in. A list sorted
+// by status is a list of what to work on, so what's on the desk comes first,
+// then whatever is closest to being ready for it, and what's finished sinks.
+var workbenchOrder = []string{"In Progress", "Primed", "Assembled", "Backlog", "Complete", "Display"}
+
+// Models returns the collection filtered and ordered for the list pane.
+// sortBy names the primary key and desc reverses it; anything unrecognised
+// falls back to status, which is what the list opens on.
+func (s *Store) Models(search, status, sortBy string, desc bool) []Model {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	search = strings.ToLower(strings.TrimSpace(search))
@@ -298,33 +307,57 @@ func (s *Store) Models(search, status, sortBy string) []Model {
 		out = append(out, m)
 	}
 	statusRank := func(st string) int {
-		for i, v := range Statuses {
+		for i, v := range workbenchOrder {
 			if v == st {
 				return i
 			}
 		}
-		return len(Statuses)
+		return len(workbenchOrder)
 	}
-	sort.SliceStable(out, func(i, j int) bool {
-		a, b := out[i], out[j]
+	byName := func(a, b Model) int {
+		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
+	}
+	// Each ordering runs one way naturally: names climb A→Z, but counts, dates
+	// and flags are only worth reading from the top down. desc flips whichever
+	// of those the list is currently on.
+	primary := func(a, b Model) int {
 		switch sortBy {
 		case "Name":
-			return strings.ToLower(a.Name) < strings.ToLower(b.Name)
-		case "Status":
-			if statusRank(a.Status) != statusRank(b.Status) {
-				return statusRank(a.Status) < statusRank(b.Status)
-			}
-			return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+			return byName(a, b)
+		case "Paints":
+			return len(b.PaintIDs) - len(a.PaintIDs)
+		case "Recent":
+			return b.ID - a.ID
 		case "Favourites":
-			if a.Favorite != b.Favorite {
-				return a.Favorite
-			}
-			return strings.ToLower(a.Name) < strings.ToLower(b.Name)
-		default: // Recent
-			return a.ID > b.ID
+			return btoi(b.Favorite) - btoi(a.Favorite)
+		default: // Status
+			return statusRank(a.Status) - statusRank(b.Status)
 		}
+	}
+	// Ties break on name and then on id, and neither follows desc: reversing
+	// the order of the column you asked for shouldn't shuffle the rows that
+	// column can't tell apart.
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if c := primary(a, b); c != 0 {
+			if desc {
+				return c > 0
+			}
+			return c < 0
+		}
+		if c := byName(a, b); c != 0 {
+			return c < 0
+		}
+		return a.ID < b.ID
 	})
 	return out
+}
+
+func btoi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func (s *Store) ModelByID(id int) (Model, bool) {
