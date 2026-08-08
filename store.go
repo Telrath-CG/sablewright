@@ -24,10 +24,17 @@ import (
 // ---------------------------------------------------------------------------
 
 type Photo struct {
-	ID    int    `json:"id"`
-	File  string `json:"file"`  // filename inside the photos folder
+	ID   int    `json:"id"`
+	File string `json:"file"` // filename inside the photos folder
+	// Thumb is the generated small copy, or empty for a photo in a format
+	// the decoder could not read. Everywhere a thumbnail is drawn falls back
+	// to File, so an empty one costs memory rather than a broken image.
+	Thumb string `json:"thumb"`
 	Kind  string `json:"kind"`  // "Progress" or "Final"
 	Added string `json:"added"` // YYYY-MM-DD
+	// Cover marks the one photo that stands for the mini in the list. At most
+	// one per model; with none set, CoverPhoto picks the best candidate.
+	Cover bool `json:"cover"`
 }
 
 // Session is one sitting at the desk: what got done, and how long it took.
@@ -89,6 +96,29 @@ func (m Model) Minis() (total, done int) {
 		done = total
 	}
 	return total, done
+}
+
+// CoverPhoto is the shot that stands for this mini in the list, or nil if it
+// has none. An explicit choice wins; failing that a final photo beats a
+// progress one, since the finished mini is what you would point at, and the
+// newest of those wins because it is the one closest to how it looks now.
+func (m Model) CoverPhoto() *Photo {
+	var final, progress *Photo
+	for i := range m.Photos {
+		p := &m.Photos[i]
+		if p.Cover {
+			return p
+		}
+		if p.Kind == "Final" {
+			final = p
+		} else {
+			progress = p
+		}
+	}
+	if final != nil {
+		return final
+	}
+	return progress
 }
 
 // TotalMinutes adds up recorded session time for this mini.
@@ -476,7 +506,7 @@ func (s *Store) DeleteModel(id int) error {
 	for i, m := range s.data.Models {
 		if m.ID == id {
 			for _, p := range m.Photos {
-				_ = os.Remove(filepath.Join(s.PhotoDir(), p.File))
+				s.removePhotoFiles(p)
 			}
 			s.data.Models = append(s.data.Models[:i], s.data.Models[i+1:]...)
 			return s.persist()
@@ -511,8 +541,11 @@ func (s *Store) AddPhoto(modelID int, srcPath, kind string) (Model, error) {
 	if err := os.WriteFile(dst, in, 0o644); err != nil {
 		return Model{}, fmt.Errorf("could not save that image: %w", err)
 	}
+	// A photo the decoder can't read is still a photo. It keeps its full-size
+	// copy and simply has no thumbnail, which every drawing site allows for.
+	thumb, _ := makeThumb(s.PhotoDir(), name)
 	s.data.Models[idx].Photos = append(s.data.Models[idx].Photos, Photo{
-		ID: s.nextID(), File: name, Kind: kind, Added: today(),
+		ID: s.nextID(), File: name, Thumb: thumb, Kind: kind, Added: today(),
 	})
 	return s.data.Models[idx], s.persist()
 }
@@ -526,7 +559,7 @@ func (s *Store) DeletePhoto(modelID, photoID int) (Model, error) {
 		}
 		for j, p := range m.Photos {
 			if p.ID == photoID {
-				_ = os.Remove(filepath.Join(s.PhotoDir(), p.File))
+				s.removePhotoFiles(p)
 				s.data.Models[i].Photos = append(m.Photos[:j], m.Photos[j+1:]...)
 				return s.data.Models[i], s.persist()
 			}
@@ -534,6 +567,96 @@ func (s *Store) DeletePhoto(modelID, photoID int) (Model, error) {
 		return m, nil
 	}
 	return Model{}, fmt.Errorf("that mini no longer exists")
+}
+
+// removePhotoFiles deletes a photo and the thumbnail made from it. A photo
+// that never got one leaves nothing behind to miss.
+func (s *Store) removePhotoFiles(p Photo) {
+	_ = os.Remove(filepath.Join(s.PhotoDir(), p.File))
+	if p.Thumb != "" {
+		_ = os.Remove(filepath.Join(s.PhotoDir(), p.Thumb))
+	}
+}
+
+// SetCoverPhoto marks one photo as the mini's cover. Choosing the one already
+// marked clears it, which hands the choice back to CoverPhoto rather than
+// leaving no way to undo a click.
+func (s *Store) SetCoverPhoto(modelID, photoID int) (Model, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, m := range s.data.Models {
+		if m.ID != modelID {
+			continue
+		}
+		was := false
+		for j := range m.Photos {
+			if m.Photos[j].ID == photoID {
+				was = m.Photos[j].Cover
+			}
+			s.data.Models[i].Photos[j].Cover = false
+		}
+		if !was {
+			for j := range m.Photos {
+				if m.Photos[j].ID == photoID {
+					s.data.Models[i].Photos[j].Cover = true
+				}
+			}
+		}
+		return s.data.Models[i], s.persist()
+	}
+	return Model{}, fmt.Errorf("that mini no longer exists")
+}
+
+// BackfillThumbs generates the thumbnails for photos that were imported
+// before thumbnails existed, and returns how many it made.
+//
+// The decoding happens outside the lock and the file is written once at the
+// end, so a collection with hundreds of photos can be caught up in the
+// background without the UI waiting on any of it. Until a photo's thumbnail
+// lands, every screen draws the original, so this is invisible apart from
+// the memory it eventually saves.
+func (s *Store) BackfillThumbs() int {
+	type job struct {
+		modelID, photoID int
+		file             string
+	}
+	s.mu.RLock()
+	var jobs []job
+	for _, m := range s.data.Models {
+		for _, p := range m.Photos {
+			if p.Thumb == "" {
+				jobs = append(jobs, job{m.ID, p.ID, p.File})
+			}
+		}
+	}
+	s.mu.RUnlock()
+
+	made := 0
+	for _, j := range jobs {
+		name, err := makeThumb(s.PhotoDir(), j.file)
+		if err != nil {
+			continue // a format the decoder doesn't know, or a missing file
+		}
+		s.mu.Lock()
+		for i, m := range s.data.Models {
+			if m.ID != j.modelID {
+				continue
+			}
+			for k := range m.Photos {
+				if m.Photos[k].ID == j.photoID {
+					s.data.Models[i].Photos[k].Thumb = name
+					made++
+				}
+			}
+		}
+		s.mu.Unlock()
+	}
+	if made > 0 {
+		s.mu.Lock()
+		_ = s.persist()
+		s.mu.Unlock()
+	}
+	return made
 }
 
 // ---------------------------------------------------------------------------

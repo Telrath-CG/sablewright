@@ -30,6 +30,11 @@ func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	// Catch up the thumbnails for photos that predate them. Off the startup
+	// path deliberately: a collection with hundreds of photos would otherwise
+	// hold the window shut while it decoded every one of them, and until each
+	// thumbnail lands the UI simply draws the original.
+	go a.store.BackfillThumbs()
 }
 
 // ---------------------------------------------------------------------------
@@ -99,8 +104,8 @@ func (a *App) ListPaints(f PaintFilter) PaintPage {
 // and its counts, so it doesn't have to pull the whole rack down to work them
 // out for itself.
 type PaintFacets struct {
-	Brands []string `json:"brands"`
-	Ranges []string `json:"ranges"`
+	Brands   []string `json:"brands"`
+	Ranges   []string `json:"ranges"`
 	Brand    string   `json:"brand"` // the requested brand, or "" if it's gone
 	Total    int      `json:"total"`
 	Owned    int      `json:"owned"`
@@ -267,6 +272,15 @@ func (a *App) AddPhotos(modelID int, kind string) (*Model, error) {
 
 func (a *App) DeletePhoto(modelID, photoID int) (*Model, error) {
 	m, err := a.store.DeletePhoto(modelID, photoID)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
+// SetCoverPhoto picks which shot represents this mini in the list.
+func (a *App) SetCoverPhoto(modelID, photoID int) (*Model, error) {
+	m, err := a.store.SetCoverPhoto(modelID, photoID)
 	if err != nil {
 		return nil, err
 	}

@@ -432,6 +432,19 @@ select:focus { border-color: var(--accent); }
 .row.sel .nm { font-weight: 600; }
 .row .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
 
+/* The cover holds its square whether or not a photo has been added, so the
+   names stay in one column instead of stepping in and out of line. */
+.row .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.row .txt { min-width: 0; flex: 1; }
+.row .cover {
+  flex: 0 0 40px; width: 40px; height: 40px; border-radius: 6px;
+  object-fit: cover; background: var(--input-bg); border: 1px solid var(--border);
+}
+.row .cover.blank {
+  display: flex; align-items: center; justify-content: center;
+  color: var(--faint); font-size: 15px;
+}
+
 /* A batch says its size beside the name and its progress under it, so the
    two read as one line of information rather than another column. */
 .qty {
@@ -474,6 +487,13 @@ select:focus { border-color: var(--accent); }
 .photo .ph { display: grid; place-items: center; color: var(--faint); font-size: 22px; }
 .photo .cap { margin-top: 5px; display: flex; align-items: center; gap: 5px; }
 .photo .x { margin-left: auto; color: var(--danger); cursor: pointer; font-size: 12px; }
+/* Picking the cover sits with the photo it applies to rather than in a
+   dropdown elsewhere, and the filled star is the one currently standing in
+   for the mini out in the list. */
+.photo .pick { margin-left: auto; color: var(--faint); cursor: pointer; font-size: 12px; }
+.photo .pick.on { color: var(--star); }
+.photo .pick + .x { margin-left: 0; }
+.photo .is-cover { color: var(--star); font-size: 11px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 7px; }
 .chip {

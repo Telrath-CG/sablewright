@@ -100,6 +100,13 @@ dashboard counts what's actually on your desk.
 folder, so moving or deleting the originals later doesn't break anything.
 Click a photo to open it full size.
 
+A thumbnail is generated on import and is what the app actually draws, so a
+mini with a dozen progress shots costs a fraction of the memory it used to;
+the original is never touched and is still what opens when you click. The star
+on a photo makes it that mini's cover — the shot shown beside it in the list.
+Choose nothing and the newest final photo stands in, falling back to the
+newest progress shot.
+
 ---
 
 ## Your data
