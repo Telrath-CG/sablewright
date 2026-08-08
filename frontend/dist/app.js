@@ -384,8 +384,18 @@ function initNav() {
 
 function show(screen) {
   state.screen = screen;
-  ({ dashboard: renderDashboard, models: renderModels,
-     paints: renderPaints, tips: renderTips })[screen]();
+  ({ dashboard: renderDashboard, models: renderModels, paints: renderPaints,
+     wishlist: renderWishlist, tips: renderTips })[screen]();
+}
+
+// Landing on a mini from somewhere else - a log entry on the dashboard, a
+// paint that turned out to be on it. The sidebar has to move too, or the
+// highlighted entry and the screen it points at disagree.
+function jumpToMini(id) {
+  state.models.selected = id;
+  document.querySelectorAll("#nav li").forEach(n =>
+    n.classList.toggle("active", n.dataset.screen === "models"));
+  show("models");
 }
 
 /* ================================================================ DASHBOARD */
@@ -457,12 +467,7 @@ async function renderDashboard() {
     </div>`);
 
   content().querySelectorAll(".log-jump").forEach(el => {
-    el.onclick = () => {
-      state.models.selected = +el.dataset.model;
-      document.querySelectorAll("#nav li").forEach(n =>
-        n.classList.toggle("active", n.dataset.screen === "models"));
-      show("models");
-    };
+    el.onclick = () => jumpToMini(+el.dataset.model);
   });
 }
 
@@ -581,7 +586,6 @@ async function renderModelDetail(id) {
   if (!m) { pane.innerHTML = `<div class="empty">Select a mini to see its details.</div>`; return; }
 
   const byId = new Map((allPaints || []).map(p => [p.id, p]));
-  const paints = (m.paintIds || []).map(pid => byId.get(pid)).filter(Boolean);
 
   const photos = (m.photos || []).length ? m.photos.map(p => `
     <div class="photo">
@@ -592,9 +596,8 @@ async function renderModelDetail(id) {
     </div>`).join("")
     : `<div style="color:var(--muted);font-size:13px">No photos yet — add progress shots when you edit this mini.</div>`;
 
-  const chips = paints.length ? `<div class="chips">${paints.map(p => `
-      <span class="chip"><span class="swatch" style="background:${esc(p.hex)}"></span>${esc(p.name)}</span>`).join("")}</div>`
-    : `<div style="color:var(--muted);font-size:13px">None recorded yet.</div>`;
+  const chips = paintChips(m.paintIds, byId)
+    || `<div style="color:var(--muted);font-size:13px">None recorded yet.</div>`;
 
   const notes = (m.notes || "").trim();
   const noteHtml = notes
@@ -761,10 +764,123 @@ async function renderPaints() {
   });
 }
 
+/* ================================================================= WISHLIST */
+// The wishlist flag has existed since the rack did, reachable only as one
+// option in the inventory's stock filter - a list you could see but never
+// take anywhere. This is the list itself: grouped the way a shop is, and
+// copyable, because the point of a shopping list is to leave the house.
+//
+// The second half is the query only this app can answer. A paint recorded on
+// a mini but not owned is one you borrowed, used at a club, or finished, and
+// it belongs on the list before you reach for the empty pot.
+async function renderWishlist() {
+  const page = await call(App().Wishlist);
+
+  const groups = new Map();
+  page.rows.forEach(p => {
+    const brand = p.brand || "No brand";
+    if (!groups.has(brand)) groups.set(brand, []);
+    groups.get(brand).push(p);
+  });
+
+  const row = (p, actions) => `
+    <div class="wrow">
+      <span class="swatch" style="background:${esc(p.hex)}"></span>
+      <span class="nm" data-paint="${p.id}">${esc(p.name)}${
+        p.code ? ` <span class="code">${esc(p.code)}</span>` : ""}</span>
+      <span class="meta">${esc([p.range, p.type].filter(Boolean).join(" · "))}${
+        p.usedOn ? ` · on ${plural(p.usedOn, "mini", "minis")}` : ""}</span>
+      ${actions}
+    </div>`;
+
+  const listed = groups.size ? [...groups].map(([brand, rows]) => `
+    <div class="wgroup">
+      <div class="whead">${esc(brand)}<span>${plural(rows.length, "paint")}</span></div>
+      ${rows.map(p => row(p, `
+        <button class="btn ghost small got" data-got="${p.id}">Got it</button>
+        <span class="x" data-drop="${p.id}" title="Take off the list">✕</span>`)).join("")}
+    </div>`).join("")
+    : `<div class="card"><div class="empty"><strong>Nothing on the list.</strong>
+         Tick “Wishlist” on any paint — or take one of the suggestions below.</div></div>`;
+
+  const missing = page.missing.length ? `
+    <div class="card" style="margin-top:16px">
+      <h2>Used on your minis but not owned</h2>
+      <div class="sub" style="margin:2px 0 0">
+        Recorded on something you've painted, with no pot in the rack —
+        borrowed, used at a club, or run dry.</div>
+      <div class="divider"></div>
+      ${page.missing.map(p => row(p, `
+        <button class="btn ghost small want" data-want="${p.id}">Add to list</button>`)).join("")}
+      <div style="padding:10px 0 2px">
+        <button class="btn ghost" id="w-all">Add all ${page.missing.length}</button>
+      </div>
+    </div>` : "";
+
+  setContent(`
+    <div class="page-head">
+      <div><h1>Wishlist</h1>
+        <div class="sub">${page.rows.length
+          ? `${plural(page.rows.length, "paint")} to buy` : "Nothing to buy"}${
+          page.missing.length ? ` · ${page.missing.length} suggested` : ""}</div></div>
+      <div class="spacer"></div>
+      ${page.rows.length ? `<button class="btn" id="w-copy">Copy list</button>` : ""}
+    </div>
+    <div class="card">${listed}</div>
+    ${missing}`);
+
+  const flags = async (id, owned, want, msg) => {
+    await call(App().SetPaintFlags, id, owned, want);
+    if (msg) toast(msg);
+    renderWishlist();
+  };
+  content().querySelectorAll("[data-got]").forEach(b => {
+    // Buying it is the end of the list entry, so ticking it off does both
+    // halves at once rather than leaving it owned and still wanted.
+    b.onclick = () => flags(+b.dataset.got, true, false, "Added to the rack");
+  });
+  content().querySelectorAll("[data-drop]").forEach(b => {
+    const p = page.rows.find(x => x.id === +b.dataset.drop);
+    b.onclick = () => flags(+b.dataset.drop, !!(p && p.owned), false);
+  });
+  content().querySelectorAll("[data-want]").forEach(b => {
+    b.onclick = () => flags(+b.dataset.want, false, true);
+  });
+  content().querySelectorAll(".wrow .nm").forEach(el => {
+    el.onclick = () => {
+      const p = [...page.rows, ...page.missing].find(x => x.id === +el.dataset.paint);
+      if (p) paintDialog(p);
+    };
+  });
+
+  const all = $("#w-all");
+  if (all) all.onclick = async () => {
+    for (const p of page.missing) await call(App().SetPaintFlags, p.id, false, true);
+    toast(`Added ${plural(page.missing.length, "paint")}`);
+    renderWishlist();
+  };
+  const copy = $("#w-copy");
+  if (copy) copy.onclick = async () => {
+    const lines = [`Sablewright wishlist — ${prettyDate(todayISO())}`, ""];
+    groups.forEach((rows, brand) => {
+      lines.push(brand);
+      rows.forEach(p => lines.push(`  ${p.name}${
+        p.range ? ` — ${p.range}` : ""}${p.code ? ` (${p.code})` : ""}`));
+      lines.push("");
+    });
+    await call(App().CopyText, lines.join("\n").trim() + "\n");
+    toast("Wishlist copied");
+  };
+}
+
 /* ===================================================================== TIPS */
 async function renderTips() {
   const f = state.tips;
-  const tips = await call(App().ListTips, { search: f.search, category: f.category });
+  const [tips, allPaints] = await Promise.all([
+    call(App().ListTips, { search: f.search, category: f.category }),
+    call(App().AllPaints),
+  ]);
+  const byId = new Map((allPaints || []).map(p => [p.id, p]));
 
   const cards = tips.length ? `<div class="tip-grid">${tips.map(t => {
     const col = TIP_COLORS[t.category] || "#6b7280";
@@ -775,6 +891,7 @@ async function renderTips() {
         <div class="head"><h3>${esc(t.title)}</h3>
           <span class="badge" style="background:${col}">${esc(t.category)}</span></div>
         <div class="notes">${lines.map(l => `<p>${esc(l.trim())}</p>`).join("")}</div>
+        ${paintChips(t.paintIds, byId)}
         ${(t.tags || []).length ? `<div class="tags">${
           t.tags.slice(0, 6).map(x => `<span>#${esc(x)}</span>`).join("")}</div>` : ""}
       </div></div>`;
@@ -802,6 +919,72 @@ async function renderTips() {
   content().querySelectorAll(".tip").forEach(c => {
     c.onclick = () => tipDialog(tips.find(t => t.id === +c.dataset.id));
   });
+}
+
+/* ---------------------------------------------------------- paint picker */
+// Two dialogs pick paints the same way - the ones used on a mini, and the
+// ones a recipe calls for - so the control is built once here. The caller
+// owns the state; this turns it into markup and says what was clicked.
+//
+// prefix namespaces the element ids, because the screen behind the dialog
+// keeps its own filter bar in the document and an id shared with it resolves
+// to whichever came first.
+function paintPicker(prefix, allPaints, chosen, filter, note) {
+  if (!allPaints.length) return `<div class="note">${note.empty}</div>`;
+
+  const q = filter.search.toLowerCase();
+  const brands = [...new Set(allPaints.map(p => p.brand).filter(Boolean))]
+    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  // The rack holds the whole catalogue, so float the paints that are actually
+  // on the desk - owned, or already ticked - to the top.
+  const matched = allPaints
+    .filter(p => filter.brand === "All brands" || p.brand === filter.brand)
+    .filter(p => !q || (p.name + " " + p.brand + " " + p.range + " " + p.code)
+      .toLowerCase().includes(q))
+    .sort((a, b) => (chosen.has(b.id) - chosen.has(a.id)) || (b.owned - a.owned));
+  const list = matched.slice(0, PICKER_LIMIT);
+
+  return `
+    <div class="filters">
+      ${searchBox(`${prefix}-psearch`, "Filter paints…", filter.search)}
+      ${selectBox(`${prefix}-pbrand`, ["All brands", ...brands], filter.brand)}
+    </div>
+    <div style="color:var(--muted);font-size:13px;margin:0 0 8px">
+      ${note.lead} Ones you own are listed first${
+        matched.length > list.length
+          ? `, and only the first ${list.length} of ${matched.length} are shown —
+             keep typing to narrow it down` : ""}.${
+        chosen.size ? ` ${plural(chosen.size, "paint")} ticked so far —
+          narrowing the filters hides rows but never unticks them.` : ""}</div>
+    <div class="picker" id="${prefix}-picker">${list.map(p => `
+      <label><input type="checkbox" data-pid="${p.id}"${chosen.has(p.id) ? " checked" : ""}>
+        <span class="swatch" style="background:${esc(p.hex)};width:16px;height:16px"></span>
+        <span>${esc(p.name)}</span>
+        <span class="meta">${esc(p.brand)}${p.range ? " " + esc(p.range) : ""} · ${
+          esc(p.type)}${p.owned ? "" : " · not owned"}</span></label>`).join("")}</div>`;
+}
+
+// onFilter re-renders the dialog around the picker; onToggle is handed the
+// paint that was ticked or unticked and the state it landed in.
+function wirePaintPicker(prefix, filter, onFilter, onToggle) {
+  const search = $(`#${prefix}-psearch`);
+  if (!search) return; // an empty rack draws the note instead
+  search.oninput = debounce(() => { filter.search = search.value; onFilter(); }, 150);
+  $(`#${prefix}-pbrand`).onchange = e => { filter.brand = e.target.value; onFilter(); };
+  document.querySelectorAll(`#${prefix}-picker input`).forEach(cb => {
+    cb.onchange = () => onToggle(+cb.dataset.pid, cb.checked);
+  });
+}
+
+// The paints on a mini or in a recipe, drawn as swatches. ids are resolved
+// against the rack rather than stored alongside the name, so renaming a paint
+// or correcting its color updates every place it is used.
+function paintChips(ids, byId) {
+  const chosen = (ids || []).map(id => byId.get(id)).filter(Boolean);
+  if (!chosen.length) return "";
+  return `<div class="chips">${chosen.map(p => `
+    <span class="chip"><span class="swatch" style="background:${esc(p.hex)}"></span>${
+      esc(p.name)}</span>`).join("")}</div>`;
 }
 
 /* =================================================================== MODALS */
@@ -840,27 +1023,13 @@ async function modelDialog(model, opts = {}) {
     completed: "", paintIds: [], photos: [],
   };
   let tab = opts.tab || "details";
-  let paintSearch = "";
-  let paintBrand = "All brands";
+  const paintFilter = { search: "", brand: "All brands" };
   // the log entry currently being edited, {} = new
   let editSession = opts.session ? { ...opts.session } : {};
   const allPaints = await call(App().AllPaints);
-  // The whole rack is already in hand, so the brand list comes off it rather
-  // than out of a second trip to the backend.
-  const pickerBrands = [...new Set(allPaints.map(p => p.brand).filter(Boolean))]
-    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
   function render() {
     const chosen = new Set(m.paintIds || []);
-    const q = paintSearch.toLowerCase();
-    // The rack holds the whole catalogue, so float the paints that are
-    // actually on the desk — owned, or already ticked — to the top.
-    const matched = allPaints
-      .filter(p => paintBrand === "All brands" || p.brand === paintBrand)
-      .filter(p => !q || (p.name + " " + p.brand + " " + p.range + " " + p.code)
-        .toLowerCase().includes(q))
-      .sort((a, b) => (chosen.has(b.id) - chosen.has(a.id)) || (b.owned - a.owned));
-    const list = matched.slice(0, PICKER_LIMIT);
 
     const details = `
       <div class="field"><label>Name</label>
@@ -893,26 +1062,11 @@ async function modelDialog(model, opts = {}) {
       <div class="field"><label>Notes for this mini</label>
         <textarea id="f-notes" placeholder="One step per line…">${esc(m.notes)}</textarea></div>`;
 
-    const paintsTab = allPaints.length ? `
-      <div class="filters">
-        ${searchBox("f-psearch", "Filter paints…", paintSearch)}
-        ${selectBox("f-pbrand", ["All brands", ...pickerBrands], paintBrand)}
-      </div>
-      <div style="color:var(--muted);font-size:13px;margin:0 0 8px">
-        Tick every paint you used on this mini. Ones you own are listed first${
-          matched.length > list.length
-            ? `, and only the first ${list.length} of ${matched.length} are shown —
-               keep typing to narrow it down` : ""}.${
-          chosen.size ? ` ${plural(chosen.size, "paint")} ticked so far —
-            narrowing the filters hides rows but never unticks them.` : ""}</div>
-      <div class="picker">${list.map(p => `
-        <label><input type="checkbox" data-pid="${p.id}"${chosen.has(p.id) ? " checked" : ""}>
-          <span class="swatch" style="background:${esc(p.hex)};width:16px;height:16px"></span>
-          <span>${esc(p.name)}</span>
-          <span class="meta">${esc(p.brand)}${p.range ? " " + esc(p.range) : ""} · ${
-            esc(p.type)}${p.owned ? "" : " · not owned"}</span></label>`).join("")}</div>`
-      : `<div class="note">Your paint rack is empty. Add some paints in Paint Inventory
-           first, then come back and tick the ones you used.</div>`;
+    const paintsTab = paintPicker("f", allPaints, chosen, paintFilter, {
+      lead: "Tick every paint you used on this mini.",
+      empty: `Your paint rack is empty. Add some paints in Paint Inventory
+              first, then come back and tick the ones you used.`,
+    });
 
     const photosTab = `
       ${isNew && !m.id ? `<div class="note">Photos are saved straight to disk, so this
@@ -1025,17 +1179,11 @@ async function modelDialog(model, opts = {}) {
       if (first) first.focus();
     }
 
-    if (tab === "paints" && allPaints.length) {
-      const ps = $("#f-psearch");
-      ps.oninput = debounce(() => { collect(); paintSearch = ps.value; render(); }, 150);
-      $("#f-pbrand").onchange = e => { paintBrand = e.target.value; render(); };
-      $("#modal").querySelectorAll(".picker input").forEach(cb => {
-        cb.onchange = () => {
-          const id = +cb.dataset.pid;
-          const set = new Set(m.paintIds || []);
-          cb.checked ? set.add(id) : set.delete(id);
-          m.paintIds = [...set];
-        };
+    if (tab === "paints") {
+      wirePaintPicker("f", paintFilter, () => { collect(); render(); }, (id, on) => {
+        const set = new Set(m.paintIds || []);
+        on ? set.add(id) : set.delete(id);
+        m.paintIds = [...set];
       });
     }
 
@@ -1175,6 +1323,22 @@ async function paintDialog(paint) {
     a.toLowerCase().localeCompare(b.toLowerCase()));
   const ranges = facets.ranges;
 
+  // "Used on 3 minis" is a dead number: which three is the question actually
+  // being asked, and it is answerable from what's already recorded. Same for
+  // the recipes - a paint is a way into the notes that call for it.
+  const found = isNew ? { minis: [], tips: [] } : await call(App().PaintLinks, p.id);
+  const linkList = (items, cls, label) => !items.length ? "" : `
+    <div class="section">${label}</div>
+    <div class="links">${items.map(x => `
+      <span class="link ${cls}" data-id="${x.id}">${esc(x.name || x.title)}${
+        x.count > 1 ? `<span class="qty">×${x.count}</span>` : ""}</span>`).join("")}</div>`;
+  const links = isNew ? "" : `
+    ${linkList(found.minis, "to-mini", `USED ON ${plural(found.minis.length, "MINI", "MINIS")}`)}
+    ${linkList(found.tips, "to-tip", `IN ${plural(found.tips.length, "RECIPE")}`)}
+    ${!found.minis.length && !found.tips.length
+      ? `<div style="color:var(--muted);font-size:13px;margin-top:14px">
+           Not recorded on any mini or in any recipe yet.</div>` : ""}`;
+
   // Every field below carries a -f suffix. The inventory screen behind the
   // dialog stays in the document and owns the plain names for its own filter
   // bar, and it comes first, so an id shared with a filter resolves to the
@@ -1214,8 +1378,7 @@ async function paintDialog(paint) {
         Owned</label>
       <label class="check"><input type="checkbox" id="p-wish-f"${p.wishlist ? " checked" : ""}>
         Wishlist</label>
-      ${!isNew ? `<div style="color:var(--muted);font-size:13px;margin-top:14px">
-        Used on ${plural(paint.usedOn || 0, "mini", "minis")}.</div>` : ""}
+      ${links}
     </div>
     <footer>
       ${!isNew ? `<button class="btn danger" id="p-del">Delete paint</button>` : ""}
@@ -1225,6 +1388,19 @@ async function paintDialog(paint) {
     </footer>`);
 
   $("#p-name").focus();
+  // Following a link leaves the paint behind, so nothing here is saved on the
+  // way out - the dialog closes exactly as Cancel would.
+  $("#modal").querySelectorAll(".link.to-mini").forEach(el => {
+    el.onclick = () => { closeModal(); jumpToMini(+el.dataset.id); };
+  });
+  $("#modal").querySelectorAll(".link.to-tip").forEach(el => {
+    el.onclick = async () => {
+      const tip = await call(App().GetTip, +el.dataset.id);
+      closeModal();
+      if (tip) tipDialog(tip);
+    };
+  });
+
   const color = $("#p-color"), hex = $("#p-hex");
   color.oninput = () => { hex.value = color.value; };
   hex.oninput = () => { if (/^#[0-9a-f]{6}$/i.test(hex.value)) color.value = hex.value; };
@@ -1266,47 +1442,78 @@ async function paintDialog(paint) {
 }
 
 /* ---- tip ---- */
-function tipDialog(tip) {
+// A recipe written as prose is a recipe you can't search by paint, so the
+// note carries the actual paints alongside the words. The dialog re-renders
+// to filter that picker, which means the text fields have to be read back
+// into `t` first - the same collect-before-render the mini dialog does.
+async function tipDialog(tip) {
   const isNew = !tip;
-  const t = tip ? { ...tip } : { id: 0, title: "", category: "Other", body: "", tags: [] };
+  const t = tip ? { ...tip } : {
+    id: 0, title: "", category: "Other", body: "", tags: [], paintIds: [],
+  };
+  const paintFilter = { search: "", brand: "All brands" };
+  const allPaints = await call(App().AllPaints);
 
-  openModal(`
-    <header><h2>${isNew ? "Add Technique Note" : "Edit Note"}</h2><button class="close">✕</button></header>
-    <div class="mbody">
-      <div class="field"><label>Title</label>
-        <input type="text" id="t-title" value="${esc(t.title)}"></div>
-      <div class="field"><label>Category</label>${selectBox("t-cat-f", TIP_CATEGORIES, t.category)}</div>
-      <div class="field"><label>The note / recipe (one step per line)</label>
-        <textarea id="t-body" style="min-height:150px">${esc(t.body)}</textarea></div>
-      <div class="field"><label>Tags (comma separated)</label>
-        <input type="text" id="t-tags" value="${esc((t.tags || []).join(", "))}"></div>
-    </div>
-    <footer>
-      ${!isNew ? `<button class="btn danger" id="t-del">Delete note</button>` : ""}
-      <div class="spacer"></div>
-      <button class="btn ghost" id="t-cancel">Cancel</button>
-      <button class="btn" id="t-save">Save</button>
-    </footer>`);
+  function collect() {
+    const g = id => { const e = $("#" + id); return e ? e.value : undefined; };
+    if (g("t-title") === undefined) return;
+    t.title = g("t-title").trim();
+    t.category = g("t-cat-f");
+    t.body = g("t-body");
+    t.tags = g("t-tags").split(",").map(s => s.trim()).filter(Boolean);
+  }
 
-  $("#t-title").focus();
-  $("#t-cancel").onclick = closeModal;
-  $("#t-save").onclick = async () => {
-    await call(App().SaveTip, {
-      ...t,
-      title: $("#t-title").value.trim(),
-      category: $("#t-cat-f").value,
-      body: $("#t-body").value,
-      tags: $("#t-tags").value.split(",").map(s => s.trim()).filter(Boolean),
+  function render() {
+    const chosen = new Set(t.paintIds || []);
+    openModal(`
+      <header><h2>${isNew ? "Add Technique Note" : "Edit Note"}</h2><button class="close">✕</button></header>
+      <div class="mbody">
+        <div class="field"><label>Title</label>
+          <input type="text" id="t-title" value="${esc(t.title)}"></div>
+        <div class="field"><label>Category</label>${selectBox("t-cat-f", TIP_CATEGORIES, t.category)}</div>
+        <div class="field"><label>The note / recipe (one step per line)</label>
+          <textarea id="t-body" style="min-height:150px">${esc(t.body)}</textarea></div>
+        <div class="field"><label>Tags (comma separated)</label>
+          <input type="text" id="t-tags" value="${esc((t.tags || []).join(", "))}"></div>
+        <div class="section">PAINTS IN THIS RECIPE${
+          chosen.size ? ` · ${plural(chosen.size, "paint")}` : ""}</div>
+        ${paintPicker("t", allPaints, chosen, paintFilter, {
+          lead: "Tick the paints this recipe calls for.",
+          empty: `Your paint rack is empty. Add some paints in Paint Inventory
+                  first, then come back and tick the ones this recipe uses.`,
+        })}
+      </div>
+      <footer>
+        ${!isNew ? `<button class="btn danger" id="t-del">Delete note</button>` : ""}
+        <div class="spacer"></div>
+        <button class="btn ghost" id="t-cancel">Cancel</button>
+        <button class="btn" id="t-save">Save</button>
+      </footer>`);
+
+    if (!$("#modal").contains(document.activeElement)) $("#t-title").focus();
+
+    wirePaintPicker("t", paintFilter, () => { collect(); render(); }, (id, on) => {
+      const set = new Set(t.paintIds || []);
+      on ? set.add(id) : set.delete(id);
+      t.paintIds = [...set];
     });
-    closeModal(); renderTips(); toast("Saved");
-  };
-  const del = $("#t-del");
-  if (del) del.onclick = async () => {
-    const ok = await call(App().Confirm, "Delete note", `Delete “${t.title}”?`, "Delete");
-    if (!ok) return;
-    await call(App().DeleteTip, t.id);
-    closeModal(); renderTips();
-  };
+
+    $("#t-cancel").onclick = closeModal;
+    $("#t-save").onclick = async () => {
+      collect();
+      await call(App().SaveTip, t);
+      closeModal(); renderTips(); toast("Saved");
+    };
+    const del = $("#t-del");
+    if (del) del.onclick = async () => {
+      const ok = await call(App().Confirm, "Delete note", `Delete “${t.title}”?`, "Delete");
+      if (!ok) return;
+      await call(App().DeleteTip, t.id);
+      closeModal(); renderTips();
+    };
+  }
+
+  render();
 }
 
 /* ===================================================================== boot */

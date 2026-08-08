@@ -92,9 +92,20 @@ and range fields are free text with autocomplete, so any paint from any maker ca
 be added, and deleting one is permanent unless you ask for the built-in set back.
 
 Paints start out unowned — tick "I own this paint" as you buy them, and the
-dashboard counts what's actually on your desk.
+dashboard counts what's actually on your desk. Opening a paint shows where it
+turns up — every mini it's recorded on and every recipe that calls for it —
+and each one clicks through to that record.
+
+**Wishlist** — the shopping list, grouped by brand the way a shop is, with
+*Copy list* to take it out of the house. Underneath it sits the list only your
+own collection can produce: paints recorded on a mini that you don't own,
+because you borrowed them, used them at a club, or ran the pot dry. *Got it*
+ticks a paint off, adding it to the rack and taking it off the list in one go.
 
 **Technique Notes** — recipes and methods, searchable by title, body or tag.
+A note can carry the paints it calls for, picked from the rack the same way a
+mini's are, so the recipe shows real swatches and the paint knows which
+recipes use it.
 
 **Photos** — added through a native file picker and *copied* into the app's own
 folder, so moving or deleting the originals later doesn't break anything.

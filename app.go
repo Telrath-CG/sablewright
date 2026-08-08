@@ -129,6 +129,52 @@ func (a *App) Facets(brand string) PaintFacets {
 	return f
 }
 
+// PaintLinks is everywhere one paint turns up in the collection. Both lists
+// come back in one call because the dialog draws them together, and both are
+// short - a paint is on a handful of minis, not hundreds.
+type PaintLinks struct {
+	Minis []MiniRef `json:"minis"`
+	Tips  []TipRef  `json:"tips"`
+}
+
+func (a *App) PaintLinks(paintID int) PaintLinks {
+	return PaintLinks{
+		Minis: a.store.ModelsUsingPaint(paintID),
+		Tips:  a.store.TipsUsingPaint(paintID),
+	}
+}
+
+// WishlistPage is the shopping list: what has been marked to buy, and what
+// the collection implies should be on it.
+type WishlistPage struct {
+	Rows    []PaintRow `json:"rows"`
+	Missing []PaintRow `json:"missing"`
+}
+
+func (a *App) Wishlist() WishlistPage {
+	listed, missing := a.store.WishlistPaints()
+	page := WishlistPage{Rows: []PaintRow{}, Missing: []PaintRow{}}
+	for _, p := range listed {
+		page.Rows = append(page.Rows, PaintRow{Paint: p, UsedOn: a.store.PaintUsage(p.ID)})
+	}
+	for _, p := range missing {
+		page.Missing = append(page.Missing, PaintRow{Paint: p, UsedOn: a.store.PaintUsage(p.ID)})
+	}
+	return page
+}
+
+// SetPaintFlags ticks owned or wanted from the shopping list, where opening
+// the edit dialog per pot would turn a quick pass into a chore.
+func (a *App) SetPaintFlags(id int, owned, wishlist bool) (Paint, error) {
+	return a.store.SetPaintFlags(id, owned, wishlist)
+}
+
+// CopyText puts the shopping list on the clipboard, which is how it reaches
+// a phone, a notes app, or whatever gets carried into the shop.
+func (a *App) CopyText(s string) error {
+	return wruntime.ClipboardSetText(a.ctx, s)
+}
+
 func (a *App) AllPaints() []Paint   { return a.store.AllPaints() }
 func (a *App) Brands() []string     { return a.store.Brands() }
 func (a *App) Statuses() []string   { return Statuses }
@@ -157,6 +203,15 @@ type TipFilter struct {
 }
 
 func (a *App) ListTips(f TipFilter) []Tip { return a.store.TipList(f.Search, f.Category) }
+
+// GetTip is how a paint opens the recipe that calls for it, without the
+// screen having to pull down every note to find one.
+func (a *App) GetTip(id int) *Tip {
+	if t, ok := a.store.TipByID(id); ok {
+		return &t
+	}
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // Writes

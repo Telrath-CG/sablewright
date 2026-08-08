@@ -151,7 +151,28 @@ type Tip struct {
 	Category string   `json:"category"`
 	Body     string   `json:"body"`
 	Tags     []string `json:"tags"`
-	Created  string   `json:"created"`
+	// PaintIDs are the paints this recipe calls for. A recipe written as
+	// prose is a recipe you can't search by paint, and "what did I use
+	// Nuln Oil for" is a question worth being able to ask of the rack.
+	PaintIDs []int  `json:"paintIds"`
+	Created  string `json:"created"`
+}
+
+// MiniRef and TipRef are enough of a mini or a note to list it and click
+// through to it, without dragging its photos, sessions and body text across
+// to draw one line.
+type MiniRef struct {
+	ID     int    `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Count  int    `json:"count"`
+	Done   int    `json:"done"`
+}
+
+type TipRef struct {
+	ID       int    `json:"id"`
+	Title    string `json:"title"`
+	Category string `json:"category"`
 }
 
 type Data struct {
@@ -911,6 +932,105 @@ func (s *Store) PaintUsage(id int) int {
 	return n
 }
 
+// UsesPaint reports whether a list of paint ids contains one.
+func usesPaint(ids []int, id int) bool {
+	for _, x := range ids {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
+// ModelsUsingPaint lists the minis a paint is recorded on, newest first.
+// "Used on 3 minis" is a dead number on its own - which three is the question
+// actually being asked, and the answer is already in the collection.
+func (s *Store) ModelsUsingPaint(id int) []MiniRef {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []MiniRef{}
+	for _, m := range s.data.Models {
+		if !usesPaint(m.PaintIDs, id) {
+			continue
+		}
+		total, done := m.Minis()
+		out = append(out, MiniRef{ID: m.ID, Name: m.Name, Status: m.Status,
+			Count: total, Done: done})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	return out
+}
+
+// TipsUsingPaint lists the recipes that call for a paint.
+func (s *Store) TipsUsingPaint(id int) []TipRef {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := []TipRef{}
+	for _, t := range s.data.Tips {
+		if usesPaint(t.PaintIDs, id) {
+			out = append(out, TipRef{ID: t.ID, Title: t.Title, Category: t.Category})
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	return out
+}
+
+// SetPaintFlags ticks owned or wishlist without sending the whole paint back
+// and forth. The shopping list works one checkbox at a time, and a round trip
+// through the edit dialog for each would make short work of a long list into
+// long work of a short one.
+func (s *Store) SetPaintFlags(id int, owned, wishlist bool) (Paint, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i, p := range s.data.Paints {
+		if p.ID == id {
+			s.data.Paints[i].Owned = owned
+			s.data.Paints[i].Wishlist = wishlist
+			return s.data.Paints[i], s.persist()
+		}
+	}
+	return Paint{}, fmt.Errorf("that paint no longer exists")
+}
+
+// WishlistPaints returns the rack's shopping list and, separately, the paints
+// the collection says are in use but that aren't owned.
+//
+// That second list is the one thing only this app can work out: a paint
+// recorded on a mini and not in the rack is one you used at a club, borrowed,
+// or ran dry, and it belongs on the list before you notice it missing at the
+// desk. Anything already on the list is left out of it.
+func (s *Store) WishlistPaints() (listed, missing []Paint) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	used := map[int]bool{}
+	for _, m := range s.data.Models {
+		for _, id := range m.PaintIDs {
+			used[id] = true
+		}
+	}
+	listed, missing = []Paint{}, []Paint{}
+	for _, p := range s.data.Paints {
+		switch {
+		case p.Wishlist:
+			listed = append(listed, p)
+		case used[p.ID] && !p.Owned:
+			missing = append(missing, p)
+		}
+	}
+	byRack := func(a, b Paint) bool {
+		if !strings.EqualFold(a.Brand, b.Brand) {
+			return strings.ToLower(a.Brand) < strings.ToLower(b.Brand)
+		}
+		if !strings.EqualFold(a.Range, b.Range) {
+			return strings.ToLower(a.Range) < strings.ToLower(b.Range)
+		}
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	}
+	sort.SliceStable(listed, func(i, j int) bool { return byRack(listed[i], listed[j]) })
+	sort.SliceStable(missing, func(i, j int) bool { return byRack(missing[i], missing[j]) })
+	return listed, missing
+}
+
 // RestoreLibraryPaints puts back any built-in paints that have been deleted.
 // Nothing already in the rack is touched.
 func (s *Store) RestoreLibraryPaints() (int, error) {
@@ -948,11 +1068,25 @@ func (s *Store) TipList(search, category string) []Tip {
 	return out
 }
 
+func (s *Store) TipByID(id int) (Tip, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, t := range s.data.Tips {
+		if t.ID == id {
+			return t, true
+		}
+	}
+	return Tip{}, false
+}
+
 func (s *Store) SaveTip(t Tip) (Tip, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if t.Tags == nil {
 		t.Tags = []string{}
+	}
+	if t.PaintIDs == nil {
+		t.PaintIDs = []int{}
 	}
 	if t.ID == 0 {
 		t.ID = s.nextID()
