@@ -41,17 +41,21 @@ func (a *App) startup(ctx context.Context) {
 // Reads
 // ---------------------------------------------------------------------------
 
-type ModelFilter struct {
-	Search string `json:"search"`
-	Status string `json:"status"`
-	Sort   string `json:"sort"`
-	// Desc reverses the chosen ordering - a second click on the column header
-	// the list is already sorted by.
-	Desc bool `json:"desc"`
+func (a *App) ListModels(f ModelFilter) []Model { return a.store.Models(f) }
+
+// ModelFacets is what the models filter bar offers: the values actually in
+// use, so the pickers can never point at something that matches nothing.
+// A facet with fewer than two values is left out of the bar entirely - a
+// collection all of one game system has no use for a game system filter.
+type ModelFacets struct {
+	Systems  []string `json:"systems"`
+	Factions []string `json:"factions"`
+	Projects []string `json:"projects"`
 }
 
-func (a *App) ListModels(f ModelFilter) []Model {
-	return a.store.Models(f.Search, f.Status, f.Sort, f.Desc)
+func (a *App) ModelFacets() ModelFacets {
+	systems, factions, projects := a.store.ModelFacets()
+	return ModelFacets{Systems: systems, Factions: factions, Projects: projects}
 }
 
 func (a *App) GetModel(id int) *Model {
