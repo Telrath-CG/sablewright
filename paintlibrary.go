@@ -12,11 +12,21 @@ import (
 // easier to read as data than as source.
 //
 // Names, product codes and range names come from each manufacturer's own
-// catalogue; the hex values are the swatch colors published by the community
-// paint databases at github.com/Arcturus5404/miniature-paints (MIT),
-// miniaturepaintingforge.com and thepaintingledger.com. They are close enough
-// to pick a pot out of a rack by eye, which is all the swatch is for - a paint
-// on a model never matches its label anyway.
+// catalogue, cross-checked against thepaintingledger.com. That pass caught
+// truncated Two Thin Coats names, AK names title-cased into nonsense, and a
+// Citadel set predating the 2022 range refresh. The ledger publishes no open
+// license, so it verifies names against the catalogues rather than serving as
+// a source of data in its own right.
+//
+// The hex values are the swatch colors published by the community paint
+// databases. github.com/Arcturus5404/miniature-paints (MIT) covers AK
+// Interactive, Pro Acryl, Warhammer Colour, Two Thin Coats and part of
+// Kimera; miniaturepaintingforge.com covers Ionic Smart Colors, which is in
+// neither of the others. The Kimera pots left over are derived by hand - the
+// paragraphs below say which, and how far to trust them.
+//
+// Swatches are close enough to pick a pot out of a rack by eye, which is all
+// they are for - a paint on a model never matches its label anyway.
 //
 // Most Citadel Air paints share a name with a Base or Layer paint, so they
 // carry the suffix the pot does: "The Fang - Air". Without it the rack would

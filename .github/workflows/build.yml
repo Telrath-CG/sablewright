@@ -162,6 +162,23 @@ jobs:
         if: runner.os == 'macOS'
         run: wails build -platform darwin/arm64 -ldflags "${{ env.LDFLAGS }}"
 
+      # The GPL asks that a copy travel with the binary, and the embedded paint
+      # data is MIT, whose notice has to reach whoever holds a copy - so both
+      # files go inside the bundle rather than only into the release.
+      #
+      # This has to run before the signing step. codesign seals the contents of
+      # Contents/Resources, so a file added afterwards leaves the bundle with a
+      # signature that no longer matches what it covers - which is the same
+      # invalid-signature state, and the same "app is damaged" Gatekeeper
+      # message, that the re-signing below exists to avoid.
+      - name: Add the license files to the bundle (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          set -euo pipefail
+          RES=build/bin/Sablewright.app/Contents/Resources
+          cp LICENSE THIRD-PARTY-NOTICES.md "$RES/"
+          ls -l "$RES/LICENSE" "$RES/THIRD-PARTY-NOTICES.md"
+
       # The Go linker ad-hoc signs the arm64 executable it produces, but it
       # signs a *binary*, not a bundle: nothing writes the resource seal at
       # Contents/_CodeSignature/CodeResources. codesign then reads a signature
@@ -300,6 +317,18 @@ jobs:
             echo "(rpm not on this image - skipping the requires dump)"
           fi
 
+      # The Linux packages install these to /usr/share/doc and the macOS bundle
+      # carries them internally, but a bare .exe has nowhere to put a file.
+      # Staging them into build/bin rides them along in every artifact so the
+      # release job can publish them next to the downloads that cannot hold
+      # them. Paths stay under build/bin deliberately: upload-artifact roots the
+      # archive at the common ancestor of everything it is given, so a path at
+      # the workspace root would push every asset down a build/bin/ prefix and
+      # break the release job's copies.
+      - name: Stage the license files for release
+        run: cp LICENSE THIRD-PARTY-NOTICES.md build/bin/
+        shell: bash
+
       - name: Upload build
         uses: actions/upload-artifact@v7
         with:
@@ -311,6 +340,8 @@ jobs:
             build/bin/*.rpm
             build/bin/*.pkg.tar.zst
             build/bin/Sablewright
+            build/bin/LICENSE
+            build/bin/THIRD-PARTY-NOTICES.md
           if-no-files-found: warn
           # These are now just a hand-off to the release job, which keeps the
           # durable copy. Short retention plus the cleanup job below is what
@@ -361,6 +392,12 @@ jobs:
                    artifacts/Sablewright-Linux/*.pkg.tar.zst; do
             cp "$f" release/
           done
+          # Published once as their own assets, so the two Windows downloads -
+          # which have nowhere internal to carry them - still arrive alongside
+          # the terms they are offered under. Every artifact holds an identical
+          # pair, so which platform they are taken from does not matter.
+          cp artifacts/Sablewright-Windows/LICENSE                release/
+          cp artifacts/Sablewright-Windows/THIRD-PARTY-NOTICES.md release/
           ls -l release
 
       # The tag is deleted and recreated on each merge so it always points at
