@@ -121,6 +121,106 @@ func TestSaveSessionFillsInAMissingStarted(t *testing.T) {
 	}
 }
 
+// Counts arrived in version 5. Every entry written before that is one mini,
+// and a zero would erase the whole collection from a dashboard that counts
+// minis by adding them up.
+func TestOlderCollectionsGetACountOfOne(t *testing.T) {
+	s := newTempStore(t)
+	writeCollection(t, s, 4, nil, []Model{{ID: 1, Name: "Marine", Status: "Complete"}})
+
+	if err := s.load(); err != nil {
+		t.Fatalf("load(): %v", err)
+	}
+
+	if got := s.data.Models[0].Count; got != 1 {
+		t.Errorf("migrated entry has Count %d, want 1", got)
+	}
+}
+
+// Calling an entry finished is the one moment the app can fill in the rest
+// without guessing, and it saves the two bits of bookkeeping most likely to
+// be skipped - which is why "Recently finished" was sorting on a blank date.
+func TestSaveModelStampsTheFinishWhenAnEntryIsCompleted(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100}
+
+	m, err := s.SaveModel(Model{Name: "Tactical Squad", Status: "Complete", Count: 10, Done: 6})
+	if err != nil {
+		t.Fatalf("SaveModel(): %v", err)
+	}
+
+	if m.Done != 10 {
+		t.Errorf("Done = %d on a completed entry of 10, want all of them", m.Done)
+	}
+	if m.Completed != today() {
+		t.Errorf("Completed = %q, want today (%q)", m.Completed, today())
+	}
+}
+
+// The stamp only ever runs one way. Correcting a status by hand, or starting
+// a repaint, must not destroy the record of when the thing was finished.
+func TestSaveModelKeepsTheFinishWhenAnEntryGoesBackToTheDesk(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100, Models: []Model{{
+		ID: 1, Name: "Marine", Status: "Complete", Count: 1, Done: 1,
+		Completed: "2026-06-03",
+	}}}
+
+	m, err := s.SaveModel(Model{ID: 1, Name: "Marine", Status: "In Progress", Count: 1, Done: 1,
+		Completed: "2026-06-03"})
+	if err != nil {
+		t.Fatalf("SaveModel(): %v", err)
+	}
+
+	if m.Completed != "2026-06-03" {
+		t.Errorf("Completed = %q after going back to In Progress, want it kept", m.Completed)
+	}
+}
+
+// A collection file can be hand-edited, and an entry claiming twelve of ten
+// painted would draw a progress bar past its own end.
+func TestMinisClampsWhatTheFileClaims(t *testing.T) {
+	total, done := Model{Status: "In Progress", Count: 0, Done: 12}.Minis()
+	if total != 1 || done != 1 {
+		t.Errorf("Minis() on a countless entry = %d of %d, want 1 of 1", done, total)
+	}
+	if _, done := (Model{Status: "Display", Count: 4}.Minis()); done != 4 {
+		t.Errorf("Minis() on a finished entry = %d painted, want all 4", done)
+	}
+}
+
+// The dashboard describes the collection, so it has to count the collection:
+// a squad of ten is ten minis on the shelf, and a part-painted one belongs to
+// both bars it straddles rather than to whichever reads better.
+func TestStatsCountsMinisRatherThanEntries(t *testing.T) {
+	s := &Store{data: Data{Models: []Model{
+		{ID: 1, Name: "Squad", Status: "In Progress", Count: 10, Done: 6},
+		{ID: 2, Name: "Hero", Status: "Complete", Count: 1},
+		{ID: 3, Name: "Boxed", Status: "Backlog", Count: 5},
+		{ID: 4, Name: "Shelf", Status: "Display", Count: 2},
+	}}}
+
+	got := s.Stats()
+
+	for _, c := range []struct {
+		what string
+		got  int
+		want int
+	}{
+		{"minis tracked", got.Models, 18},
+		{"finished", got.Finished, 9},
+		{"in progress", got.InProg, 4},
+		{"Complete bar", got.ByStatus["Complete"], 7},
+		{"In Progress bar", got.ByStatus["In Progress"], 4},
+		{"Backlog bar", got.ByStatus["Backlog"], 5},
+		{"Display bar", got.ByStatus["Display"], 2},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s = %d, want %d", c.what, c.got, c.want)
+		}
+	}
+}
+
 func modelNames(t *testing.T, ms []Model) string {
 	t.Helper()
 	out := make([]string, len(ms))
