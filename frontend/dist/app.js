@@ -43,7 +43,8 @@ const MAGNIFIER =
 
 const state = {
   screen: "dashboard",
-  models: { search: "", status: "All", sort: "Status", desc: false, selected: null },
+  models: { search: "", status: "All", system: "All", faction: "All",
+            project: "All", sort: "Status", desc: false, selected: null },
   paints: { search: "", type: "All types", brand: "All brands",
             range: "All ranges", stock: "All" },
   tips:   { search: "", category: "All" },
@@ -196,6 +197,17 @@ function searchBox(id, placeholder, value) {
 
 // prefix labels the choices without becoming part of them: "Sort: Status" in
 // a bar that already holds a Status filter, while the value stays "Status".
+// A free-text field that suggests what the collection already uses - the same
+// trick the paint dialog plays with brands. Anything can be typed, but the
+// second mini of a faction only has to be picked, which is what keeps the
+// filters from filling up with three spellings of the same army.
+function suggestBox(id, value, values, placeholder) {
+  return `<input type="text" id="${id}" value="${esc(value || "")}" list="${id}-list"
+      placeholder="${esc(placeholder)}" autocomplete="off">
+    <datalist id="${id}-list">${
+      (values || []).map(v => `<option value="${esc(v)}">`).join("")}</datalist>`;
+}
+
 function selectBox(id, options, value, prefix = "") {
   return `<select id="${id}">` +
     options.map(o => `<option value="${esc(o)}"${o === value ? " selected" : ""}>${
@@ -474,8 +486,22 @@ async function renderDashboard() {
 /* =================================================================== MODELS */
 async function renderModels() {
   const f = state.models;
-  const models = await call(App().ListModels,
-    { search: f.search, status: f.status, sort: f.sort, desc: f.desc });
+  const [models, facets] = await Promise.all([
+    call(App().ListModels, { search: f.search, status: f.status, system: f.system,
+      faction: f.faction, project: f.project, sort: f.sort, desc: f.desc }),
+    call(App().ModelFacets),
+  ]);
+
+  // A filter pointing at a value nothing carries any more - the last mini of
+  // that faction was renamed or deleted - would hide the whole collection
+  // with no way to see why, so it falls back to showing everything.
+  const facetValues = { system: facets.systems, faction: facets.factions,
+                        project: facets.projects };
+  let stale = false;
+  Object.entries(facetValues).forEach(([key, values]) => {
+    if (f[key] !== "All" && !values.includes(f[key])) { f[key] = "All"; stale = true; }
+  });
+  if (stale) return renderModels();
 
   if (models.length && !models.some(m => m.id === f.selected)) f.selected = models[0].id;
   if (!models.length) f.selected = null;
@@ -492,7 +518,8 @@ async function renderModels() {
         <div class="txt">
           <div class="nm">${esc(m.name)}${
             m.count > 1 ? `<span class="qty">×${m.count}</span>` : ""}</div>
-          <div class="sub">${esc([m.gameSystem, m.faction].filter(Boolean).join(" · ") || "—")}</div>
+          <div class="sub">${esc(
+            [m.gameSystem, m.faction, m.project].filter(Boolean).join(" · ") || "—")}</div>
           ${progressBar(m.done, m.count)}
         </div>
       </div>
@@ -501,6 +528,11 @@ async function renderModels() {
     </div>`;
   }).join("")
     : `<div class="empty"><strong>No minis yet.</strong>Click “+ Add Mini” to start your collection.</div>`;
+
+  // A filter nobody can use is clutter: one game system across the whole
+  // collection means the system picker can only ever say "all of them".
+  const facetBox = (id, key, label) => facetValues[key].length < 2 ? ""
+    : selectBox(id, ["All", ...facetValues[key]], f[key], label + ": ");
 
   // Entries and minis are the same number until a batch splits them, and the
   // heading only spends words on the difference once there is one.
@@ -526,7 +558,10 @@ async function renderModels() {
     </div>
     <div class="filters">
       ${searchBox("m-search", "Search minis…", f.search)}
-      ${selectBox("m-status", ["All", ...STATUSES], f.status)}
+      ${selectBox("m-status", ["All", ...STATUSES], f.status, "Status: ")}
+      ${facetBox("m-system", "system", "System")}
+      ${facetBox("m-faction", "faction", "Faction")}
+      ${facetBox("m-project", "project", "Project")}
       ${selectBox("m-sort", MODEL_SORTS, f.sort, "Sort: ")}
     </div>
     <div class="split">
@@ -541,6 +576,10 @@ async function renderModels() {
   const search = $("#m-search");
   search.oninput = debounce(() => { f.search = search.value; renderModels(); }, 180);
   $("#m-status").onchange = e => { f.status = e.target.value; renderModels(); };
+  Object.keys(facetValues).forEach(key => {
+    const el = $(`#m-${key}`);
+    if (el) el.onchange = e => { f[key] = e.target.value; renderModels(); };
+  });
   // Picking an ordering fresh starts it the way round it's meant to be read.
   $("#m-sort").onchange = e => { f.sort = e.target.value; f.desc = false; renderModels(); };
   $("#add-model").onclick = () => modelDialog(null);
@@ -642,7 +681,8 @@ async function renderModelDetail(id) {
       <div class="title-row">
         <div style="flex:1;min-width:0">
           <h2>${esc(m.name)}</h2>
-          <div class="sub">${esc([m.gameSystem, m.faction].filter(Boolean).join(" · ") || "—")}</div>
+          <div class="sub">${esc(
+            [m.gameSystem, m.faction, m.project].filter(Boolean).join(" · ") || "—")}</div>
         </div>
         <button class="star-btn${m.favorite ? " on" : ""}" id="fav" title="Favourite">${m.favorite ? "★" : "☆"}</button>
       </div>
@@ -1017,7 +1057,7 @@ function escClose(e) { if (e.key === "Escape") closeModal(); }
 async function modelDialog(model, opts = {}) {
   const isNew = !model;
   let m = model ? { ...model } : {
-    id: 0, name: "", gameSystem: "", faction: "", status: "Backlog",
+    id: 0, name: "", gameSystem: "", faction: "", project: "", status: "Backlog",
     count: 1, done: 0, favorite: false, notes: "",
     started: new Date().toISOString().slice(0, 10),
     completed: "", paintIds: [], photos: [],
@@ -1026,7 +1066,9 @@ async function modelDialog(model, opts = {}) {
   const paintFilter = { search: "", brand: "All brands" };
   // the log entry currently being edited, {} = new
   let editSession = opts.session ? { ...opts.session } : {};
-  const allPaints = await call(App().AllPaints);
+  const [allPaints, facets] = await Promise.all([
+    call(App().AllPaints), call(App().ModelFacets),
+  ]);
 
   function render() {
     const chosen = new Set(m.paintIds || []);
@@ -1034,11 +1076,13 @@ async function modelDialog(model, opts = {}) {
     const details = `
       <div class="field"><label>Name</label>
         <input type="text" id="f-name" value="${esc(m.name)}" autofocus></div>
-      <div class="grid2">
+      <div class="grid3">
         <div class="field"><label>Game system</label>
-          <input type="text" id="f-sys" value="${esc(m.gameSystem)}"></div>
+          ${suggestBox("f-sys", m.gameSystem, facets.systems, "e.g. Warhammer 40,000")}</div>
         <div class="field"><label>Faction / unit</label>
-          <input type="text" id="f-fac" value="${esc(m.faction)}"></div>
+          ${suggestBox("f-fac", m.faction, facets.factions, "e.g. Death Guard")}</div>
+        <div class="field"><label>Project <span class="opt">(optional)</span></label>
+          ${suggestBox("f-proj", m.project, facets.projects, "e.g. Tournament list")}</div>
       </div>
       <div class="grid3">
         <div class="field"><label>Status</label>${selectBox("f-status", STATUSES, m.status)}</div>
@@ -1247,6 +1291,7 @@ async function modelDialog(model, opts = {}) {
       m.name = g("f-name").trim();
       m.gameSystem = g("f-sys").trim();
       m.faction = g("f-fac").trim();
+      m.project = g("f-proj").trim();
       m.status = g("f-status");
       m.count = intOf(g("f-count"), 1);
       m.done = intOf(g("f-painted"), 0);

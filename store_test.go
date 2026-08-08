@@ -310,6 +310,64 @@ func TestSetCoverPhotoTogglesTheChoiceOff(t *testing.T) {
 	}
 }
 
+// Game system and faction were recorded on every mini and usable only as
+// words in the search box, which matches a mini whose notes happen to mention
+// the army it's fighting. Filtering on them is exact.
+func TestModelsFilterOnTheFacetsExactly(t *testing.T) {
+	s := &Store{data: Data{Models: []Model{
+		{ID: 1, Name: "Plague Marines", GameSystem: "40k", Faction: "Death Guard",
+			Project: "Tournament"},
+		{ID: 2, Name: "Blightlord", GameSystem: "40k", Faction: "Death Guard"},
+		{ID: 3, Name: "Skink", GameSystem: "AoS", Faction: "Seraphon",
+			Project: "Tournament"},
+		{ID: 4, Name: "Notes mention Death Guard", GameSystem: "AoS", Faction: "Nurgle"},
+	}}}
+
+	for _, c := range []struct {
+		what string
+		f    ModelFilter
+		want string
+	}{
+		{"a faction", ModelFilter{Faction: "Death Guard", Sort: "Name"},
+			"Blightlord, Plague Marines"},
+		{"a system", ModelFilter{System: "AoS", Sort: "Name"},
+			"Notes mention Death Guard, Skink"},
+		{"a project", ModelFilter{Project: "Tournament", Sort: "Name"},
+			"Plague Marines, Skink"},
+		{"two at once", ModelFilter{System: "40k", Project: "Tournament", Sort: "Name"},
+			"Plague Marines"},
+		{"All everywhere", ModelFilter{System: "All", Faction: "All", Project: "All",
+			Sort: "Name"},
+			"Blightlord, Notes mention Death Guard, Plague Marines, Skink"},
+	} {
+		if got := modelNames(t, s.Models(c.f)); got != c.want {
+			t.Errorf("filtering by %s = %s, want %s", c.what, got, c.want)
+		}
+	}
+}
+
+// The pickers offer what the collection actually contains, so they can never
+// point at a value that matches nothing. Blanks are not a choice.
+func TestModelFacetsListWhatIsInUse(t *testing.T) {
+	s := &Store{data: Data{Models: []Model{
+		{ID: 1, GameSystem: "40k", Faction: "Death Guard", Project: "Tournament"},
+		{ID: 2, GameSystem: "40k", Faction: "  ", Project: ""},
+		{ID: 3, GameSystem: "AoS", Faction: "Seraphon"},
+	}}}
+
+	systems, factions, projects := s.ModelFacets()
+
+	if strings.Join(systems, ", ") != "40k, AoS" {
+		t.Errorf("systems = %v, want the two in use, deduplicated", systems)
+	}
+	if strings.Join(factions, ", ") != "Death Guard, Seraphon" {
+		t.Errorf("factions = %v, want the blank one left out", factions)
+	}
+	if strings.Join(projects, ", ") != "Tournament" {
+		t.Errorf("projects = %v, want just the one", projects)
+	}
+}
+
 func modelNames(t *testing.T, ms []Model) string {
 	t.Helper()
 	out := make([]string, len(ms))
@@ -330,7 +388,7 @@ func TestModelsSortByStatusLeadsWithWhatIsOnTheDesk(t *testing.T) {
 		{ID: 3, Name: "Half-Painted Ork", Status: "In Progress"},
 	}}}
 
-	got := modelNames(t, s.Models("", "All", "Status", false))
+	got := modelNames(t, s.Models(ModelFilter{Sort: "Status"}))
 	want := "Half-Painted Ork, Boxed Necron, Finished Marine"
 	if got != want {
 		t.Errorf("Models() sorted by status = %s, want %s", got, want)
@@ -347,7 +405,7 @@ func TestModelsDescReversesTheColumnButNotTheTieBreak(t *testing.T) {
 		{ID: 3, Name: "Anvil", Status: "Complete"},
 	}}}
 
-	got := modelNames(t, s.Models("", "All", "Status", true))
+	got := modelNames(t, s.Models(ModelFilter{Sort: "Status", Desc: true}))
 	want := "Anvil, Zogg, Mordred"
 	if got != want {
 		t.Errorf("Models() sorted by status, reversed = %s, want %s", got, want)
@@ -363,11 +421,11 @@ func TestModelsSortByPaintsStartsWithTheMostPainted(t *testing.T) {
 		{ID: 3, Name: "None", Status: "In Progress"},
 	}}}
 
-	got := modelNames(t, s.Models("", "All", "Paints", false))
+	got := modelNames(t, s.Models(ModelFilter{Sort: "Paints"}))
 	if want := "Three, One, None"; got != want {
 		t.Errorf("Models() sorted by paints = %s, want %s", got, want)
 	}
-	got = modelNames(t, s.Models("", "All", "Paints", true))
+	got = modelNames(t, s.Models(ModelFilter{Sort: "Paints", Desc: true}))
 	if want := "None, One, Three"; got != want {
 		t.Errorf("Models() sorted by paints, reversed = %s, want %s", got, want)
 	}

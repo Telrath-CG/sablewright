@@ -430,7 +430,12 @@ select:focus { border-color: var(--accent); }
 .row.sel { background: var(--sel); border-left-color: var(--accent); }
 .row .nm { font-size: 14px; }
 .row.sel .nm { font-weight: 600; }
-.row .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+/* System, faction and project all land on this line, so it has to give up
+   gracefully rather than wrapping the row to three lines. */
+.row .sub {
+  color: var(--muted); font-size: 12px; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 
 /* The cover holds its square whether or not a photo has been added, so the
    names stay in one column instead of stepping in and out of line. */

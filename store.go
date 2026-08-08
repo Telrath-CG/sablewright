@@ -55,21 +55,26 @@ type Session struct {
 // deserves his own photos and his own log simply gets his own entry, which is
 // how a painter thinks of him anyway.
 type Model struct {
-	ID         int       `json:"id"`
-	Name       string    `json:"name"`
-	GameSystem string    `json:"gameSystem"`
-	Faction    string    `json:"faction"`
-	Status     string    `json:"status"`
-	Count      int       `json:"count"` // minis in this entry; at least 1
-	Done       int       `json:"done"`  // how many of them are finished
-	Favorite   bool      `json:"favorite"`
-	Notes      string    `json:"notes"`
-	Started    string    `json:"started"`
-	Completed  string    `json:"completed"`
-	Created    string    `json:"created"`
-	PaintIDs   []int     `json:"paintIds"`
-	Photos     []Photo   `json:"photos"`
-	Sessions   []Session `json:"sessions"`
+	ID         int    `json:"id"`
+	Name       string `json:"name"`
+	GameSystem string `json:"gameSystem"`
+	Faction    string `json:"faction"`
+	Status     string `json:"status"`
+	// Project groups entries into a thing being worked towards - an army, a
+	// tournament list, a boxed game. Free text with autocomplete, exactly as
+	// Brand works on a paint: the list of projects is whatever is in use, so
+	// there is no separate record to create first and none left behind.
+	Project   string    `json:"project"`
+	Count     int       `json:"count"` // minis in this entry; at least 1
+	Done      int       `json:"done"`  // how many of them are finished
+	Favorite  bool      `json:"favorite"`
+	Notes     string    `json:"notes"`
+	Started   string    `json:"started"`
+	Completed string    `json:"completed"`
+	Created   string    `json:"created"`
+	PaintIDs  []int     `json:"paintIds"`
+	Photos    []Photo   `json:"photos"`
+	Sessions  []Session `json:"sessions"`
 }
 
 // finished is true of the statuses that mean the painting is over. Display is
@@ -381,20 +386,42 @@ func (s *Store) nextID() int {
 // then whatever is closest to being ready for it, and what's finished sinks.
 var workbenchOrder = []string{"In Progress", "Primed", "Assembled", "Backlog", "Complete", "Display"}
 
+// ModelFilter is everything the models list asks for in one go: what to keep,
+// and what order to put it in. Sort names the primary key and Desc reverses
+// it; anything unrecognised falls back to status, which the list opens on.
+type ModelFilter struct {
+	Search string `json:"search"`
+	Status string `json:"status"`
+	// System, Faction and Project each match exactly, and an empty one - or
+	// the "All" the pickers show - matches everything.
+	System  string `json:"system"`
+	Faction string `json:"faction"`
+	Project string `json:"project"`
+	Sort    string `json:"sort"`
+	Desc    bool   `json:"desc"`
+}
+
+// matches is true when a facet filter is unset or the value is exactly it.
+// The pickers offer what's in use, so "All" is the only wildcard needed.
+func matches(want, have string) bool {
+	return want == "" || want == "All" || want == have
+}
+
 // Models returns the collection filtered and ordered for the list pane.
-// sortBy names the primary key and desc reverses it; anything unrecognised
-// falls back to status, which is what the list opens on.
-func (s *Store) Models(search, status, sortBy string, desc bool) []Model {
+func (s *Store) Models(f ModelFilter) []Model {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	search = strings.ToLower(strings.TrimSpace(search))
+	search := strings.ToLower(strings.TrimSpace(f.Search))
+	sortBy, desc := f.Sort, f.Desc
 	out := make([]Model, 0, len(s.data.Models))
 	for _, m := range s.data.Models {
-		if status != "" && status != "All" && m.Status != status {
+		if !matches(f.Status, m.Status) || !matches(f.System, m.GameSystem) ||
+			!matches(f.Faction, m.Faction) || !matches(f.Project, m.Project) {
 			continue
 		}
 		if search != "" {
-			hay := strings.ToLower(m.Name + " " + m.GameSystem + " " + m.Faction + " " + m.Notes)
+			hay := strings.ToLower(strings.Join([]string{
+				m.Name, m.GameSystem, m.Faction, m.Project, m.Notes}, " "))
 			if !strings.Contains(hay, search) {
 				continue
 			}
@@ -456,6 +483,32 @@ func btoi(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// ModelFacets reports the game systems, factions and projects in use, each
+// sorted and deduplicated. Free-text fields with no separate record behind
+// them, exactly like a paint's brand: the list of projects is whatever the
+// collection says it is, so nothing has to be created before it can be
+// typed and nothing is left behind when the last entry using it changes.
+func (s *Store) ModelFacets() (systems, factions, projects []string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := [3]map[string]bool{{}, {}, {}}
+	out := [3][]string{{}, {}, {}}
+	for _, m := range s.data.Models {
+		for i, v := range []string{m.GameSystem, m.Faction, m.Project} {
+			if v = strings.TrimSpace(v); v != "" && !seen[i][v] {
+				seen[i][v] = true
+				out[i] = append(out[i], v)
+			}
+		}
+	}
+	for i := range out {
+		sort.SliceStable(out[i], func(a, b int) bool {
+			return strings.ToLower(out[i][a]) < strings.ToLower(out[i][b])
+		})
+	}
+	return out[0], out[1], out[2]
 }
 
 func (s *Store) ModelByID(id int) (Model, bool) {
