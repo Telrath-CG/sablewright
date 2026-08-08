@@ -40,9 +40,14 @@ type ModelFilter struct {
 	Search string `json:"search"`
 	Status string `json:"status"`
 	Sort   string `json:"sort"`
+	// Desc reverses the chosen ordering - a second click on the column header
+	// the list is already sorted by.
+	Desc bool `json:"desc"`
 }
 
-func (a *App) ListModels(f ModelFilter) []Model { return a.store.Models(f.Search, f.Status, f.Sort) }
+func (a *App) ListModels(f ModelFilter) []Model {
+	return a.store.Models(f.Search, f.Status, f.Sort, f.Desc)
+}
 
 func (a *App) GetModel(id int) *Model {
 	if m, ok := a.store.ModelByID(id); ok {

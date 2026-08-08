@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -117,6 +118,69 @@ func TestSaveSessionFillsInAMissingStarted(t *testing.T) {
 	if m.Started != "2026-06-15" {
 		t.Errorf("Started = %q on a mini with no start date, want the session's date",
 			m.Started)
+	}
+}
+
+func modelNames(t *testing.T, ms []Model) string {
+	t.Helper()
+	out := make([]string, len(ms))
+	for i, m := range ms {
+		out[i] = m.Name
+	}
+	return strings.Join(out, ", ")
+}
+
+// The list opens on this ordering and the first row is the one selected, so
+// it decides what the detail pane shows on arrival. Ordering by the pipeline
+// put a finished mini above one still on the desk, which is backwards: the
+// half-painted one is the one about to be edited.
+func TestModelsSortByStatusLeadsWithWhatIsOnTheDesk(t *testing.T) {
+	s := &Store{data: Data{Models: []Model{
+		{ID: 1, Name: "Finished Marine", Status: "Complete"},
+		{ID: 2, Name: "Boxed Necron", Status: "Backlog"},
+		{ID: 3, Name: "Half-Painted Ork", Status: "In Progress"},
+	}}}
+
+	got := modelNames(t, s.Models("", "All", "Status", false))
+	want := "Half-Painted Ork, Boxed Necron, Finished Marine"
+	if got != want {
+		t.Errorf("Models() sorted by status = %s, want %s", got, want)
+	}
+}
+
+// Clicking a column header a second time reverses that column. The rows it
+// can't tell apart aren't part of what was asked for, so they stay put -
+// otherwise every reversal reshuffles the names inside each status too.
+func TestModelsDescReversesTheColumnButNotTheTieBreak(t *testing.T) {
+	s := &Store{data: Data{Models: []Model{
+		{ID: 1, Name: "Zogg", Status: "Complete"},
+		{ID: 2, Name: "Mordred", Status: "In Progress"},
+		{ID: 3, Name: "Anvil", Status: "Complete"},
+	}}}
+
+	got := modelNames(t, s.Models("", "All", "Status", true))
+	want := "Anvil, Zogg, Mordred"
+	if got != want {
+		t.Errorf("Models() sorted by status, reversed = %s, want %s", got, want)
+	}
+}
+
+// A count is worth reading from the top down, so the paints column starts on
+// most-first and only reads the other way once reversed.
+func TestModelsSortByPaintsStartsWithTheMostPainted(t *testing.T) {
+	s := &Store{data: Data{Models: []Model{
+		{ID: 1, Name: "One", Status: "Backlog", PaintIDs: []int{1}},
+		{ID: 2, Name: "Three", Status: "Complete", PaintIDs: []int{1, 2, 3}},
+		{ID: 3, Name: "None", Status: "In Progress"},
+	}}}
+
+	got := modelNames(t, s.Models("", "All", "Paints", false))
+	if want := "Three, One, None"; got != want {
+		t.Errorf("Models() sorted by paints = %s, want %s", got, want)
+	}
+	got = modelNames(t, s.Models("", "All", "Paints", true))
+	if want := "None, One, Three"; got != want {
+		t.Errorf("Models() sorted by paints, reversed = %s, want %s", got, want)
 	}
 }
 
