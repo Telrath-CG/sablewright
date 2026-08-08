@@ -60,6 +60,15 @@ recently, and your latest painting sessions.
 double-click to edit. Each mini holds a status, the paints used, technique
 notes, photos, and a painting log.
 
+**Projects** — a project is whatever your minis say they belong to. Put a
+project name on a mini — an army, a tournament list, a boxed game — and it
+appears here with everything else that shares it: how many of its minis are
+painted, the hours logged against it, what to pick up next, and a deadline if
+you set one. Projects sort by deadline, soonest first. Nothing has to be
+created before it can be typed, and nothing is left behind when the last mini
+using a name is renamed. *Edit* sets the deadline and notes, renames the
+project across every mini at once, or ungroups them without deleting anything.
+
 **Painting log** — the point of this is to record what actually happened at the
 desk. Open a mini, go to the *Painting log* tab, and add a dated entry with an
 optional number of minutes: *"Nuln Oil recess shading done, started edge

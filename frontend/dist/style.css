@@ -485,6 +485,35 @@ select:focus { border-color: var(--accent); }
 }
 .links .link:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ------------------------------------------------------------- projects */
+/* Two columns while there's room for them: a project card is a paragraph of
+   figures, not a table, and a full-width one is mostly whitespace. */
+.project-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 16px; align-items: start;
+}
+.project { padding: 16px 18px 14px; }
+.phead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.phead h2 { margin: 0; padding: 0; font-size: 17px; }
+.phead .spacer { flex: 1; }
+.due {
+  font-size: 12px; font-weight: 600; color: var(--muted);
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 9px;
+}
+/* A week out is worth noticing; past the date is worth not missing. */
+.due.soon { color: #c07b1f; border-color: #c07b1f66; }
+.due.over { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+.pstats {
+  display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 4px;
+  color: var(--muted); font-size: 13px;
+}
+.pstats strong { color: var(--text); }
+.pnotes { color: var(--muted); font-size: 13px; margin: 10px 0 2px; white-space: pre-wrap; }
+.pfoot { padding-top: 10px; font-size: 13px; }
+.pfoot .open { color: var(--accent); cursor: pointer; }
+.pfoot .open:hover { text-decoration: underline; }
+.project .links .qty { margin-left: 6px; color: var(--faint); }
+
 /* The wishlist is read the way a shop is laid out - by brand, then by the
    maker's own range - so the group heading carries the brand and each row
    only has to say which paint it is. */

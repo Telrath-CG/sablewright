@@ -192,6 +192,18 @@ func (a *App) CopyText(s string) error {
 // the store so the buckets it produces can be tested against a fixed day.
 func (a *App) TimeReport() TimeReport { return a.store.TimeReport(time.Now()) }
 
+// Projects rolls up what's filed under each project name, for the same
+// reason and in the same way.
+func (a *App) Projects() []Project { return a.store.Projects(time.Now()) }
+
+func (a *App) SaveProject(p ProjectMeta) error { return a.store.SaveProject(p) }
+
+// RenameProject re-tags every mini filed under the old name and returns how
+// many moved. An empty new name ungroups them.
+func (a *App) RenameProject(from, to string) (int, error) {
+	return a.store.RenameProject(from, to)
+}
+
 func (a *App) AllPaints() []Paint   { return a.store.AllPaints() }
 func (a *App) Brands() []string     { return a.store.Brands() }
 func (a *App) Statuses() []string   { return Statuses }

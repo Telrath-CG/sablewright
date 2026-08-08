@@ -188,13 +188,25 @@ type Trashed struct {
 	Deleted string `json:"deleted"` // YYYY-MM-DD
 }
 
+// ProjectMeta is what a project carries beyond the minis in it. The minis
+// themselves are the project: it exists because entries name it, exactly as a
+// brand exists because paints name it. This is only the deadline and the
+// notes, which have nowhere else to live - and a project with neither has no
+// row here at all.
+type ProjectMeta struct {
+	Name  string `json:"name"` // matches Model.Project exactly
+	Due   string `json:"due"`  // YYYY-MM-DD, optional
+	Notes string `json:"notes"`
+}
+
 type Data struct {
-	Version int       `json:"version"`
-	NextID  int       `json:"nextId"`
-	Models  []Model   `json:"models"`
-	Paints  []Paint   `json:"paints"`
-	Tips    []Tip     `json:"tips"`
-	Trash   []Trashed `json:"trash"`
+	Version  int           `json:"version"`
+	NextID   int           `json:"nextId"`
+	Models   []Model       `json:"models"`
+	Paints   []Paint       `json:"paints"`
+	Tips     []Tip         `json:"tips"`
+	Trash    []Trashed     `json:"trash"`
+	Projects []ProjectMeta `json:"projects"`
 }
 
 // Store owns the data file and guards it with a mutex.
@@ -445,6 +457,17 @@ func (s *Store) nextID() int {
 // then whatever is closest to being ready for it, and what's finished sinks.
 var workbenchOrder = []string{"In Progress", "Primed", "Assembled", "Backlog", "Complete", "Display"}
 
+// workbenchRank places a status in that order. An unknown status sorts last,
+// which is where a value from a newer build or a hand-edited file belongs.
+func workbenchRank(status string) int {
+	for i, v := range workbenchOrder {
+		if v == status {
+			return i
+		}
+	}
+	return len(workbenchOrder)
+}
+
 // ModelFilter is everything the models list asks for in one go: what to keep,
 // and what order to put it in. Sort names the primary key and Desc reverses
 // it; anything unrecognised falls back to status, which the list opens on.
@@ -490,14 +513,6 @@ func (s *Store) Models(f ModelFilter) []Model {
 		m.Count, m.Done = m.Minis()
 		out = append(out, m)
 	}
-	statusRank := func(st string) int {
-		for i, v := range workbenchOrder {
-			if v == st {
-				return i
-			}
-		}
-		return len(workbenchOrder)
-	}
 	byName := func(a, b Model) int {
 		return strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name))
 	}
@@ -515,7 +530,7 @@ func (s *Store) Models(f ModelFilter) []Model {
 		case "Favourites":
 			return btoi(b.Favorite) - btoi(a.Favorite)
 		default: // Status
-			return statusRank(a.Status) - statusRank(b.Status)
+			return workbenchRank(a.Status) - workbenchRank(b.Status)
 		}
 	}
 	// Ties break on name and then on id, and neither follows desc: reversing
@@ -841,6 +856,187 @@ func (s *Store) BackfillThumbs() int {
 		s.mu.Unlock()
 	}
 	return made
+}
+
+// ---------------------------------------------------------------------------
+// Projects
+// ---------------------------------------------------------------------------
+
+// Project is one project rolled up: its minis counted, its hours added, and
+// what to pick up next. Nothing here is stored except the deadline and the
+// notes - the rest is the collection, read through the name.
+type Project struct {
+	Name     string         `json:"name"`
+	Due      string         `json:"due"`
+	Notes    string         `json:"notes"`
+	Entries  int            `json:"entries"`
+	Minis    int            `json:"minis"`
+	Done     int            `json:"done"`
+	Minutes  int            `json:"minutes"`
+	Sessions int            `json:"sessions"`
+	ByStatus map[string]int `json:"byStatus"`
+	// Next is what to pick up, in the order the models list would put it:
+	// what's on the desk first, then whatever is closest to ready for it.
+	Next []MiniRef `json:"next"`
+	// DaysLeft is meaningful only when Due is set. Negative is overdue, and
+	// it is counted here so that every screen agrees on what "today" means.
+	DaysLeft int `json:"daysLeft"`
+}
+
+// Projects rolls up every project in use, soonest deadline first.
+func (s *Store) Projects(now time.Time) []Project {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	meta := map[string]ProjectMeta{}
+	byName := map[string]*Project{}
+	order := []string{}
+	take := func(name string) *Project {
+		if p, ok := byName[name]; ok {
+			return p
+		}
+		p := &Project{Name: name, ByStatus: map[string]int{}, Next: []MiniRef{}}
+		byName[name] = p
+		order = append(order, name)
+		return p
+	}
+	// A project keeps its card once it has a deadline, even with nothing
+	// filed under it yet - that is a plan, and losing it would be surprising.
+	for _, m := range s.data.Projects {
+		meta[m.Name] = m
+		take(m.Name)
+	}
+
+	for _, m := range s.data.Models {
+		name := strings.TrimSpace(m.Project)
+		if name == "" {
+			continue
+		}
+		p := take(name)
+		total, done := m.Minis()
+		p.Entries++
+		p.Minis += total
+		p.Done += done
+		p.ByStatus[m.Status] += total
+		for _, e := range m.Sessions {
+			p.Sessions++
+			p.Minutes += e.Minutes
+		}
+		if !finished(m.Status) {
+			p.Next = append(p.Next, MiniRef{ID: m.ID, Name: m.Name,
+				Status: m.Status, Count: total, Done: done})
+		}
+	}
+
+	out := make([]Project, 0, len(order))
+	todayStr := now.Format("2006-01-02")
+	for _, name := range order {
+		p := byName[name]
+		if md, ok := meta[name]; ok {
+			p.Due, p.Notes = md.Due, md.Notes
+			if md.Due != "" {
+				p.DaysLeft = daysBetween(todayStr, md.Due)
+			}
+		}
+		sort.SliceStable(p.Next, func(i, j int) bool {
+			ri, rj := workbenchRank(p.Next[i].Status), workbenchRank(p.Next[j].Status)
+			if ri != rj {
+				return ri < rj
+			}
+			return strings.ToLower(p.Next[i].Name) < strings.ToLower(p.Next[j].Name)
+		})
+		if len(p.Next) > 4 {
+			p.Next = p.Next[:4]
+		}
+		out = append(out, *p)
+	}
+	// A deadline is the whole reason to write one down, so dated projects
+	// come first in the order they fall due; the rest follow by name.
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if (a.Due == "") != (b.Due == "") {
+			return a.Due != ""
+		}
+		if a.Due != b.Due {
+			return a.Due < b.Due
+		}
+		return strings.ToLower(a.Name) < strings.ToLower(b.Name)
+	})
+	return out
+}
+
+// daysBetween counts whole days from one YYYY-MM-DD to another, and returns 0
+// for anything it can't parse rather than a wild number.
+func daysBetween(from, to string) int {
+	a, err1 := time.Parse("2006-01-02", from)
+	b, err2 := time.Parse("2006-01-02", to)
+	if err1 != nil || err2 != nil {
+		return 0
+	}
+	return int(b.Sub(a).Hours() / 24)
+}
+
+// SaveProject records a deadline and notes against a project name. With
+// neither, the row is dropped: the project still exists for as long as minis
+// name it, and an empty record would only be clutter in the file.
+func (s *Store) SaveProject(p ProjectMeta) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p.Name = strings.TrimSpace(p.Name)
+	if p.Name == "" {
+		return fmt.Errorf("a project needs a name")
+	}
+	empty := strings.TrimSpace(p.Due) == "" && strings.TrimSpace(p.Notes) == ""
+	for i, ex := range s.data.Projects {
+		if ex.Name == p.Name {
+			if empty {
+				s.data.Projects = append(s.data.Projects[:i], s.data.Projects[i+1:]...)
+			} else {
+				s.data.Projects[i] = p
+			}
+			return s.persist()
+		}
+	}
+	if empty {
+		return nil
+	}
+	s.data.Projects = append(s.data.Projects, p)
+	return s.persist()
+}
+
+// RenameProject re-tags every mini filed under a project, and carries the
+// deadline and notes across with them. This is the answer to the one real
+// weakness of grouping on free text: without it, fixing a typo in a project
+// name means editing every mini that carries it.
+//
+// Renaming to nothing ungroups them, which is how a project is dissolved
+// without touching the minis themselves.
+func (s *Store) RenameProject(from, to string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	from, to = strings.TrimSpace(from), strings.TrimSpace(to)
+	if from == "" {
+		return 0, fmt.Errorf("which project?")
+	}
+	moved := 0
+	for i, m := range s.data.Models {
+		if strings.TrimSpace(m.Project) == from {
+			s.data.Models[i].Project = to
+			moved++
+		}
+	}
+	kept := s.data.Projects[:0]
+	for _, md := range s.data.Projects {
+		switch {
+		case md.Name != from:
+			kept = append(kept, md)
+		case to != "":
+			md.Name = to
+			kept = append(kept, md)
+		}
+	}
+	s.data.Projects = kept
+	return moved, s.persist()
 }
 
 // ---------------------------------------------------------------------------
