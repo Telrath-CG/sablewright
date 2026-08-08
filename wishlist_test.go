@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Only macOS draws the buttons a dialog asks for. Windows and Linux answer with
 // their own word for yes, so a confirmation matched on the caller's label alone
@@ -31,6 +34,92 @@ func TestIsAffirmativeRejectsAnEmptyAnswerEvenWithAnEmptyLabel(t *testing.T) {
 
 // The wishlist is a shopping list, not the opposite of owned: a pot you have
 // but have nearly used up belongs on it too.
+// The shopping list's second half is the query only this app can run: a paint
+// recorded on a mini with no pot in the rack. Anything already flagged stays
+// out of it, or the suggestion list would just repeat the list above it.
+func TestWishlistSuggestsPaintsUsedButNotOwned(t *testing.T) {
+	s := &Store{data: Data{
+		Paints: []Paint{
+			{ID: 1, Name: "Borrowed Blue", Brand: "B", Owned: false},
+			{ID: 2, Name: "Owned Ochre", Brand: "A", Owned: true},
+			{ID: 3, Name: "Wanted White", Brand: "A", Owned: false, Wishlist: true},
+			{ID: 4, Name: "Untouched Umber", Brand: "A", Owned: false},
+			{ID: 5, Name: "Run Dry Red", Brand: "A", Owned: false, Wishlist: true},
+		},
+		Models: []Model{{ID: 10, Name: "Marine", PaintIDs: []int{1, 2, 5}}},
+	}}
+
+	listed, missing := s.WishlistPaints()
+
+	// Both are brand A with no range, so they fall to name order.
+	if names := paintNames(listed); names != "Run Dry Red, Wanted White" {
+		t.Errorf("listed = %s, want the two flagged, in rack order", names)
+	}
+	// 2 is owned, 4 was never used, and 5 is already on the list above.
+	if names := paintNames(missing); names != "Borrowed Blue" {
+		t.Errorf("missing = %s, want only the used-but-unowned paint", names)
+	}
+}
+
+func paintNames(ps []Paint) string {
+	out := make([]string, len(ps))
+	for i, p := range ps {
+		out[i] = p.Name
+	}
+	return strings.Join(out, ", ")
+}
+
+// Ticking a pot off the shopping list is two changes at once - it is owned
+// now, and no longer wanted - and the list would otherwise keep showing it.
+func TestSetPaintFlagsTicksOffWithoutTheEditDialog(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100, Paints: []Paint{
+		{ID: 1, Name: "Wanted White", Owned: false, Wishlist: true},
+	}}
+
+	p, err := s.SetPaintFlags(1, true, false)
+	if err != nil {
+		t.Fatalf("SetPaintFlags(): %v", err)
+	}
+	if !p.Owned || p.Wishlist {
+		t.Errorf("paint is owned=%v wanted=%v, want owned and no longer wanted",
+			p.Owned, p.Wishlist)
+	}
+}
+
+// A paint is a way into the records that mention it, which is the question
+// "used on 3 minis" was raising and refusing to answer.
+func TestPaintLinksFindTheMinisAndRecipesThatUseIt(t *testing.T) {
+	s := &Store{data: Data{
+		Models: []Model{
+			{ID: 1, Name: "Squad", Status: "In Progress", Count: 10, Done: 6,
+				PaintIDs: []int{7, 8}},
+			{ID: 2, Name: "Hero", Status: "Complete", Count: 1, PaintIDs: []int{9}},
+		},
+		Tips: []Tip{
+			{ID: 3, Title: "Rust", Category: "Effects", PaintIDs: []int{7}},
+			{ID: 4, Title: "Cloaks", Category: "Blending", PaintIDs: []int{9}},
+		},
+	}}
+	a := &App{store: s}
+
+	got := a.PaintLinks(7)
+
+	if len(got.Minis) != 1 || got.Minis[0].Name != "Squad" {
+		t.Fatalf("minis = %v, want just the squad", got.Minis)
+	}
+	if got.Minis[0].Count != 10 || got.Minis[0].Done != 6 {
+		t.Errorf("mini ref = %d of %d, want the batch it belongs to",
+			got.Minis[0].Done, got.Minis[0].Count)
+	}
+	if len(got.Tips) != 1 || got.Tips[0].Title != "Rust" {
+		t.Errorf("tips = %v, want just the rust recipe", got.Tips)
+	}
+	if links := a.PaintLinks(99); len(links.Minis) != 0 || len(links.Tips) != 0 {
+		t.Errorf("an unused paint reported %v", links)
+	}
+}
+
 func TestWishlistIsIndependentOfOwned(t *testing.T) {
 	s := newTempStore(t)
 	if err := s.load(); err != nil {

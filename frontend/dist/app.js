@@ -43,7 +43,8 @@ const MAGNIFIER =
 
 const state = {
   screen: "dashboard",
-  models: { search: "", status: "All", sort: "Status", desc: false, selected: null },
+  models: { search: "", status: "All", system: "All", faction: "All",
+            project: "All", sort: "Status", desc: false, selected: null },
   paints: { search: "", type: "All types", brand: "All brands",
             range: "All ranges", stock: "All" },
   tips:   { search: "", category: "All" },
@@ -112,6 +113,48 @@ function prettyDate(iso) {
 
 function plural(n, one, many) { return `${n} ${n === 1 ? one : (many || one + "s")}`; }
 
+// Counts arrive from text inputs rather than number spinners, so that a
+// half-typed or pasted value is never silently mangled on the way in.
+function intOf(value, fallback) {
+  const n = parseInt(String(value == null ? "" : value).replace(/[^0-9]/g, ""), 10);
+  return isNaN(n) ? fallback : n;
+}
+
+// A squad is one row, so the row has to show how far through it is. Nothing
+// is drawn for a single mini: a 0-of-1 bar beside a status badge already
+// saying as much is noise.
+function progressBar(done, total) {
+  if (!(total > 1)) return "";
+  return `<div class="progress" title="${done} of ${total} painted">
+    <div class="fill" style="width:${Math.round((done / total) * 100)}%"></div>
+    <span>${done}/${total}</span>
+  </div>`;
+}
+
+// Tiles draw the generated thumbnail; clicking one opens the original. A
+// photo in a format the decoder couldn't read has no thumbnail and falls
+// back to the full image, which is heavy but never broken.
+function photoSrc(p) {
+  return `/photos/${encodeURIComponent(p.thumb || p.file)}`;
+}
+
+// The shot that stands for a mini in the list: an explicit choice first, then
+// the newest final photo, then the newest progress one. Mirrors CoverPhoto in
+// the store, which is what every other reader of this goes through.
+function coverPhoto(m) {
+  const photos = m.photos || [];
+  return photos.find(p => p.cover)
+    || [...photos].reverse().find(p => p.kind === "Final")
+    || photos[photos.length - 1]
+    || null;
+}
+
+// The collection is measured in minis, and the entries are how they're filed.
+// The two only need saying apart once a batch makes them differ.
+function miniCount(models) {
+  return models.reduce((n, m) => n + (m.count || 1), 0);
+}
+
 // 95 -> "1h 35m", 60 -> "1h", 0 -> ""
 function duration(mins) {
   if (!mins) return "";
@@ -122,12 +165,22 @@ function duration(mins) {
 function todayISO() { return new Date().toISOString().slice(0, 10); }
 
 let toastTimer = null;
-function toast(msg) {
+// A toast can carry one action, which is how a delete offers to undo itself.
+// It stays up longer when it does: the message is no longer just telling you
+// what happened, it's waiting to hear whether you meant it.
+function toast(msg, action) {
   const t = $("#toast");
   t.textContent = msg;
+  if (action) {
+    const btn = document.createElement("button");
+    btn.className = "undo";
+    btn.textContent = action.label;
+    btn.onclick = () => { t.hidden = true; action.run(); };
+    t.appendChild(btn);
+  }
   t.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, 2600);
+  toastTimer = setTimeout(() => { t.hidden = true; }, action ? 8000 : 2600);
 }
 
 // Every backend call goes through here so a failure surfaces as a message
@@ -154,6 +207,17 @@ function searchBox(id, placeholder, value) {
 
 // prefix labels the choices without becoming part of them: "Sort: Status" in
 // a bar that already holds a Status filter, while the value stays "Status".
+// A free-text field that suggests what the collection already uses - the same
+// trick the paint dialog plays with brands. Anything can be typed, but the
+// second mini of a faction only has to be picked, which is what keeps the
+// filters from filling up with three spellings of the same army.
+function suggestBox(id, value, values, placeholder) {
+  return `<input type="text" id="${id}" value="${esc(value || "")}" list="${id}-list"
+      placeholder="${esc(placeholder)}" autocomplete="off">
+    <datalist id="${id}-list">${
+      (values || []).map(v => `<option value="${esc(v)}">`).join("")}</datalist>`;
+}
+
 function selectBox(id, options, value, prefix = "") {
   return `<select id="${id}">` +
     options.map(o => `<option value="${esc(o)}"${o === value ? " selected" : ""}>${
@@ -340,10 +404,57 @@ function initNav() {
   $("#btn-folder").onclick = () => call(App().OpenDataFolder);
 }
 
+/* ------------------------------------------------------------- keyboard */
+// Arrow keys walk the models list and Enter opens what's highlighted, so a
+// pass through the collection doesn't have to be done with the mouse.
+//
+// One listener on the document, registered once, rather than one per render:
+// the list is rebuilt on every keystroke in the search box, and handlers
+// attached to it would be attached again with it.
+function initKeys() {
+  document.addEventListener("keydown", e => {
+    if (state.screen !== "models") return;
+    if (!$("#modal-backdrop").hidden) return; // the dialog owns the keyboard
+    // Typing in the search box means arrows move the caret, not the list.
+    const el = document.activeElement;
+    if (el && /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return;
+
+    const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
+    if (!step && e.key !== "Enter") return;
+
+    const rows = [...document.querySelectorAll("#m-rows .row")];
+    if (!rows.length) return;
+    const at = rows.findIndex(r => +r.dataset.id === state.models.selected);
+    e.preventDefault();
+    if (!step) { openModel(state.models.selected); return; }
+
+    // A first press with nothing selected starts at the top rather than
+    // jumping to whichever end the arrow happens to point away from.
+    const next = rows[at < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, at + step))];
+    state.models.selected = +next.dataset.id;
+    rows.forEach(r => r.classList.toggle("sel", r === next));
+    next.scrollIntoView({ block: "nearest" });
+    // Only the pane is redrawn: rebuilding the list would throw away the
+    // rows this is walking, and held arrows would fight the round trip.
+    renderModelDetail(state.models.selected);
+  });
+}
+
 function show(screen) {
   state.screen = screen;
-  ({ dashboard: renderDashboard, models: renderModels,
-     paints: renderPaints, tips: renderTips })[screen]();
+  ({ dashboard: renderDashboard, models: renderModels, projects: renderProjects,
+     paints: renderPaints, wishlist: renderWishlist, tips: renderTips,
+     time: renderTime })[screen]();
+}
+
+// Landing on a mini from somewhere else - a log entry on the dashboard, a
+// paint that turned out to be on it. The sidebar has to move too, or the
+// highlighted entry and the screen it points at disagree.
+function jumpToMini(id) {
+  state.models.selected = id;
+  document.querySelectorAll("#nav li").forEach(n =>
+    n.classList.toggle("active", n.dataset.screen === "models"));
+  show("models");
 }
 
 /* ================================================================ DASHBOARD */
@@ -415,34 +526,66 @@ async function renderDashboard() {
     </div>`);
 
   content().querySelectorAll(".log-jump").forEach(el => {
-    el.onclick = () => {
-      state.models.selected = +el.dataset.model;
-      document.querySelectorAll("#nav li").forEach(n =>
-        n.classList.toggle("active", n.dataset.screen === "models"));
-      show("models");
-    };
+    el.onclick = () => jumpToMini(+el.dataset.model);
   });
 }
 
 /* =================================================================== MODELS */
 async function renderModels() {
   const f = state.models;
-  const models = await call(App().ListModels,
-    { search: f.search, status: f.status, sort: f.sort, desc: f.desc });
+  const [models, facets] = await Promise.all([
+    call(App().ListModels, { search: f.search, status: f.status, system: f.system,
+      faction: f.faction, project: f.project, sort: f.sort, desc: f.desc }),
+    call(App().ModelFacets),
+  ]);
+
+  // A filter pointing at a value nothing carries any more - the last mini of
+  // that faction was renamed or deleted - would hide the whole collection
+  // with no way to see why, so it falls back to showing everything.
+  const facetValues = { system: facets.systems, faction: facets.factions,
+                        project: facets.projects };
+  let stale = false;
+  Object.entries(facetValues).forEach(([key, values]) => {
+    if (f[key] !== "All" && !values.includes(f[key])) { f[key] = "All"; stale = true; }
+  });
+  if (stale) return renderModels();
 
   if (models.length && !models.some(m => m.id === f.selected)) f.selected = models[0].id;
   if (!models.length) f.selected = null;
 
-  const rows = models.length ? models.map(m => `
+  // The cover keeps its square whether or not there is a photo in it, so the
+  // names stay in one column instead of stepping in and out.
+  const rows = models.length ? models.map(m => {
+    const cover = coverPhoto(m);
+    return `
     <div class="row${m.id === f.selected ? " sel" : ""}" data-id="${m.id}">
-      <div>
-        <div class="nm">${esc(m.name)}</div>
-        <div class="sub">${esc([m.gameSystem, m.faction].filter(Boolean).join(" · ") || "—")}</div>
+      <div class="who">
+        ${cover ? `<img class="cover" src="${photoSrc(cover)}" alt="" loading="lazy">`
+                : `<span class="cover blank">▤</span>`}
+        <div class="txt">
+          <div class="nm">${esc(m.name)}${
+            m.count > 1 ? `<span class="qty">×${m.count}</span>` : ""}</div>
+          <div class="sub">${esc(
+            [m.gameSystem, m.faction, m.project].filter(Boolean).join(" · ") || "—")}</div>
+          ${progressBar(m.done, m.count)}
+        </div>
       </div>
       <div>${badge(m.status)}</div>
       <div class="count">${(m.paintIds || []).length}${m.favorite ? ' <span class="star">★</span>' : ""}</div>
-    </div>`).join("")
+    </div>`;
+  }).join("")
     : `<div class="empty"><strong>No minis yet.</strong>Click “+ Add Mini” to start your collection.</div>`;
+
+  // A filter nobody can use is clutter: one game system across the whole
+  // collection means the system picker can only ever say "all of them".
+  const facetBox = (id, key, label) => facetValues[key].length < 2 ? ""
+    : selectBox(id, ["All", ...facetValues[key]], f[key], label + ": ");
+
+  // Entries and minis are the same number until a batch splits them, and the
+  // heading only spends words on the difference once there is one.
+  const minis = miniCount(models);
+  const tally = minis === models.length ? plural(minis, "mini")
+    : `${plural(minis, "mini")} in ${plural(models.length, "entry", "entries")}`;
 
   // The arrow follows the values, not the flag: A→Z and in-progress-first
   // both point up, while "most paints first" points down unreversed.
@@ -456,13 +599,16 @@ async function renderModels() {
 
   setContent(`
     <div class="page-head">
-      <div><h1>Models</h1><div class="sub">Your collection — ${plural(models.length, "mini")}</div></div>
+      <div><h1>Models</h1><div class="sub">Your collection — ${tally}</div></div>
       <div class="spacer"></div>
       <button class="btn" id="add-model">+&nbsp; Add Mini</button>
     </div>
     <div class="filters">
       ${searchBox("m-search", "Search minis…", f.search)}
-      ${selectBox("m-status", ["All", ...STATUSES], f.status)}
+      ${selectBox("m-status", ["All", ...STATUSES], f.status, "Status: ")}
+      ${facetBox("m-system", "system", "System")}
+      ${facetBox("m-faction", "faction", "Faction")}
+      ${facetBox("m-project", "project", "Project")}
       ${selectBox("m-sort", MODEL_SORTS, f.sort, "Sort: ")}
     </div>
     <div class="split">
@@ -477,6 +623,10 @@ async function renderModels() {
   const search = $("#m-search");
   search.oninput = debounce(() => { f.search = search.value; renderModels(); }, 180);
   $("#m-status").onchange = e => { f.status = e.target.value; renderModels(); };
+  Object.keys(facetValues).forEach(key => {
+    const el = $(`#m-${key}`);
+    if (el) el.onchange = e => { f[key] = e.target.value; renderModels(); };
+  });
   // Picking an ordering fresh starts it the way round it's meant to be read.
   $("#m-sort").onchange = e => { f.sort = e.target.value; f.desc = false; renderModels(); };
   $("#add-model").onclick = () => modelDialog(null);
@@ -522,19 +672,18 @@ async function renderModelDetail(id) {
   if (!m) { pane.innerHTML = `<div class="empty">Select a mini to see its details.</div>`; return; }
 
   const byId = new Map((allPaints || []).map(p => [p.id, p]));
-  const paints = (m.paintIds || []).map(pid => byId.get(pid)).filter(Boolean);
 
   const photos = (m.photos || []).length ? m.photos.map(p => `
     <div class="photo">
-      <img src="/photos/${encodeURIComponent(p.file)}" alt="" data-file="${esc(p.file)}">
+      <img src="${photoSrc(p)}" alt="" data-file="${esc(p.file)}" loading="lazy">
       <div class="cap"><span class="badge" style="background:${
-        p.kind === "Final" ? STATUS_COLORS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span></div>
+        p.kind === "Final" ? STATUS_COLORS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span>${
+        p.cover ? `<span class="is-cover" title="Cover shot">★</span>` : ""}</div>
     </div>`).join("")
     : `<div style="color:var(--muted);font-size:13px">No photos yet — add progress shots when you edit this mini.</div>`;
 
-  const chips = paints.length ? `<div class="chips">${paints.map(p => `
-      <span class="chip"><span class="swatch" style="background:${esc(p.hex)}"></span>${esc(p.name)}</span>`).join("")}</div>`
-    : `<div style="color:var(--muted);font-size:13px">None recorded yet.</div>`;
+  const chips = paintChips(m.paintIds, byId)
+    || `<div style="color:var(--muted);font-size:13px">None recorded yet.</div>`;
 
   const notes = (m.notes || "").trim();
   const noteHtml = notes
@@ -579,15 +728,20 @@ async function renderModelDetail(id) {
       <div class="title-row">
         <div style="flex:1;min-width:0">
           <h2>${esc(m.name)}</h2>
-          <div class="sub">${esc([m.gameSystem, m.faction].filter(Boolean).join(" · ") || "—")}</div>
+          <div class="sub">${esc(
+            [m.gameSystem, m.faction, m.project].filter(Boolean).join(" · ") || "—")}</div>
         </div>
         <button class="star-btn${m.favorite ? " on" : ""}" id="fav" title="Favourite">${m.favorite ? "★" : "☆"}</button>
       </div>
       <div style="display:flex;align-items:center;gap:10px">
-        ${badge(m.status)}<span style="flex:1"></span>
+        ${badge(m.status)}${m.count > 1
+          ? `<span class="batch">${plural(m.count, "mini")} · ${m.done} painted</span>` : ""}
+        <span style="flex:1"></span>
         ${timerBtn}
+        <button class="btn ghost small" id="export" title="Save this mini as a page or a note">Export</button>
         <button class="btn ghost small" id="edit">Edit</button>
       </div>
+      ${progressBar(m.done, m.count)}
       <div class="section">PHOTOS</div><div class="photos">${photos}</div>
       <div class="section">PAINTS USED</div>${chips}
       <div class="section">NOTES</div>${noteHtml}
@@ -601,6 +755,13 @@ async function renderModelDetail(id) {
     </div>`;
 
   $("#edit").onclick = () => modelDialog(m);
+  // The save dialog decides the format: an .html file carries its photos
+  // inside it, an .md file writes them into a folder alongside. Cancelling
+  // comes back with no path and should say nothing at all.
+  $("#export").onclick = async () => {
+    const path = await call(App().ExportMini, m.id);
+    if (path) toast("Exported");
+  };
   // no redraw here: startTimer -> drawTimer -> syncDetailTimer does it
   const startBtn = $("#start-timer");
   if (startBtn) startBtn.onclick = () => startTimer(m.id, m.name);
@@ -698,10 +859,317 @@ async function renderPaints() {
   });
 }
 
+/* ================================================================= PROJECTS */
+// A project is not a record you create - it is whatever minis say they belong
+// to, exactly as a brand is whatever paints say they are. This screen reads
+// that name and adds up what's behind it; the only things stored here are the
+// deadline and the notes, which have nowhere else to live.
+async function renderProjects() {
+  const projects = await call(App().Projects);
+
+  // "in 9 days", "today", "3 days over" - a countdown is what a deadline is
+  // for, and the date alone makes you do the arithmetic yourself.
+  const countdown = p => {
+    if (!p.due) return "";
+    const d = p.daysLeft;
+    const when = d === 0 ? "due today"
+      : d > 0 ? `${plural(d, "day")} left`
+      : `${plural(-d, "day")} over`;
+    return `<span class="due${d < 0 ? " over" : d <= 7 ? " soon" : ""}">${
+      when} · ${prettyDate(p.due)}</span>`;
+  };
+
+  const cards = projects.length ? projects.map(p => `
+    <div class="card project" data-name="${esc(p.name)}">
+      <div class="phead">
+        <h2>${esc(p.name)}</h2>
+        ${countdown(p)}
+        <span class="spacer"></span>
+        <button class="btn ghost small" data-edit="${esc(p.name)}">Edit</button>
+      </div>
+      <div class="pstats">
+        <span><strong>${p.done}</strong> of <strong>${p.minis}</strong> minis painted</span>
+        <span>${plural(p.entries, "entry", "entries")}</span>
+        ${p.minutes ? `<span>${duration(p.minutes)} across ${
+          plural(p.sessions, "session")}</span>` : ""}
+        ${p.minis && p.minutes ? `<span>${duration(Math.round(p.minutes / p.minis))} a mini</span>` : ""}
+      </div>
+      ${progressBar(p.done, Math.max(p.minis, 2))}
+      ${p.notes ? `<div class="pnotes">${esc(p.notes)}</div>` : ""}
+      ${p.next.length ? `<div class="section">NEXT UP</div>
+        <div class="links">${p.next.map(n => `
+          <span class="link to-mini" data-id="${n.id}">${esc(n.name)}${
+            n.count > 1 ? `<span class="qty">${n.done}/${n.count}</span>` : ""}</span>`).join("")}</div>`
+        : `<div class="pnotes">Everything filed under this is finished.</div>`}
+      <div class="divider"></div>
+      <div class="pfoot"><span class="open" data-open="${esc(p.name)}">
+        Show these ${plural(p.entries, "entry", "entries")} in Models →</span></div>
+    </div>`).join("")
+    : `<div class="card"><div class="empty"><strong>No projects yet.</strong>
+         Put a project name on a mini — an army, a tournament list, a boxed
+         game — and it shows up here with everything else that shares it.</div></div>`;
+
+  setContent(`
+    <div class="page-head">
+      <div><h1>Projects</h1>
+        <div class="sub">What you're working towards${
+          projects.length ? ` — ${plural(projects.length, "project")}` : ""}</div></div>
+    </div>
+    <div class="project-grid">${cards}</div>`);
+
+  content().querySelectorAll("[data-edit]").forEach(b => {
+    b.onclick = () => projectDialog(projects.find(p => p.name === b.dataset.edit));
+  });
+  content().querySelectorAll("[data-open]").forEach(b => {
+    b.onclick = () => {
+      // Landing in Models with only this project showing, and the other
+      // filters cleared so nothing else is quietly hiding half of it.
+      Object.assign(state.models, { search: "", status: "All", system: "All",
+        faction: "All", project: b.dataset.open });
+      document.querySelectorAll("#nav li").forEach(n =>
+        n.classList.toggle("active", n.dataset.screen === "models"));
+      show("models");
+    };
+  });
+  content().querySelectorAll(".link.to-mini").forEach(el => {
+    el.onclick = () => jumpToMini(+el.dataset.id);
+  });
+}
+
+// Renaming is the answer to the one real weakness of grouping on free text:
+// without it, fixing a typo means editing every mini that carries it.
+function projectDialog(p) {
+  openModal(`
+    <header><h2>${esc(p.name)}</h2><button class="close">✕</button></header>
+    <div class="mbody">
+      <div class="grid2">
+        <div class="field"><label>Name</label>
+          <input type="text" id="pr-name" value="${esc(p.name)}">
+          <div class="hint">Renaming re-tags all ${plural(p.entries, "entry", "entries")}.</div>
+        </div>
+        <div class="field"><label>Deadline <span class="opt">(optional)</span></label>
+          <input type="date" id="pr-due" value="${esc(p.due)}"></div>
+      </div>
+      <div class="field"><label>Notes</label>
+        <textarea id="pr-notes" placeholder="What this is for, what's left…">${esc(p.notes)}</textarea></div>
+      <div class="note">Clearing the name ungroups these minis without deleting
+        anything — they stay exactly as they are, just filed under nothing.</div>
+    </div>
+    <footer>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="pr-cancel">Cancel</button>
+      <button class="btn" id="pr-save">Save</button>
+    </footer>`);
+
+  $("#pr-name").focus();
+  $("#pr-cancel").onclick = closeModal;
+  $("#pr-save").onclick = async () => {
+    const name = $("#pr-name").value.trim();
+    // The rename has to land first: the metadata is keyed by name, and
+    // saving it under the old one would leave it behind on a project that
+    // no longer exists.
+    if (name !== p.name) {
+      const moved = await call(App().RenameProject, p.name, name);
+      if (!name) {
+        closeModal(); renderProjects();
+        toast(`Ungrouped ${plural(moved, "mini", "minis")}`);
+        return;
+      }
+    }
+    await call(App().SaveProject, {
+      name, due: $("#pr-due").value, notes: $("#pr-notes").value.trim(),
+    });
+    closeModal(); renderProjects(); toast("Saved");
+  };
+}
+
+/* ===================================================================== TIME */
+// The dashboard reports time as one ever-growing total, which stops being
+// interesting the moment it's large. This is the same log asked the questions
+// that actually change: how much this month, how long a mini takes, where the
+// hours went. Every figure here is derived - nothing extra is recorded.
+async function renderTime() {
+  const r = await call(App().TimeReport);
+
+  if (!r.sessions) {
+    setContent(`
+      <div class="page-head"><div><h1>Time at the Desk</h1>
+        <div class="sub">What the painting log adds up to</div></div></div>
+      <div class="card"><div class="empty"><strong>No sessions logged yet.</strong>
+        Open a mini, go to the Painting log tab, and write down what you got
+        done. Add the minutes and this screen fills itself in.</div></div>`);
+    return;
+  }
+
+  const cards = [
+    [duration(r.thisMonth) || "—", "This month", "#2f7d8a"],
+    [duration(r.last30) || "—", "Last 30 days", "#0ea5e9"],
+    [duration(r.total), "All time", STATUS_COLORS["Complete"]],
+    [plural(r.days, "day"), "Days at the desk", "#8b5cf6"],
+    [duration(r.perSession) || "—", "Average session", "#f59e0b"],
+    [duration(r.perMini) || "—", "Average a mini", "#c07b1f"],
+  ].map(([n, l, c]) => `
+    <div class="card stat">
+      <div class="bar" style="background:${c}"></div>
+      <div><div class="n">${n}</div><div class="l">${l}</div></div>
+    </div>`).join("");
+
+  // The tallest month sets the scale. An empty month keeps a sliver of bar so
+  // the year reads as twelve columns rather than a gap with some bars in it.
+  const peak = Math.max(1, ...r.months.map(m => m.minutes));
+  const bars = r.months.map(m => `
+    <div class="col">
+      <div class="val" style="color:${m.minutes ? "var(--text)" : "var(--faint)"}">${
+        duration(m.minutes) || "—"}</div>
+      <div class="bar" style="height:${m.minutes ? Math.max(6, Math.round(m.minutes / peak * 100)) : 2}%;
+           background:${m.minutes ? "#2f7d8a" : "#e3e8ee"}"></div>
+      <div class="lbl">${esc(m.label)}</div>
+    </div>`).join("");
+
+  const busiest = r.busiest.map(b => `
+    <div class="mini-row time-jump" data-model="${b.id}" style="cursor:pointer">
+      <span class="name">${esc(b.name)}${
+        b.count > 1 ? `<span class="qty">×${b.count}</span>` : ""}</span>
+      <span class="date">${b.count > 1 ? `${duration(b.perMini)} a mini · ` : ""}${
+        duration(b.minutes)}</span>
+    </div>`).join("");
+
+  setContent(`
+    <div class="page-head"><div><h1>Time at the Desk</h1>
+      <div class="sub">${plural(r.sessions, "session")} logged across ${
+        plural(r.days, "day")}</div></div></div>
+    <div class="stats">${cards}</div>
+    <div class="card" style="margin-top:16px">
+      <h2>The last twelve months</h2>
+      <div class="chart tall">${bars}</div>
+    </div>
+    <div class="card" style="margin-top:16px">
+      <h2>Where the hours went</h2><div class="divider"></div>
+      <div style="padding:6px 0 10px">${busiest}</div>
+    </div>`);
+
+  content().querySelectorAll(".time-jump").forEach(el => {
+    el.onclick = () => jumpToMini(+el.dataset.model);
+  });
+}
+
+/* ================================================================= WISHLIST */
+// The wishlist flag has existed since the rack did, reachable only as one
+// option in the inventory's stock filter - a list you could see but never
+// take anywhere. This is the list itself: grouped the way a shop is, and
+// copyable, because the point of a shopping list is to leave the house.
+//
+// The second half is the query only this app can answer. A paint recorded on
+// a mini but not owned is one you borrowed, used at a club, or finished, and
+// it belongs on the list before you reach for the empty pot.
+async function renderWishlist() {
+  const page = await call(App().Wishlist);
+
+  const groups = new Map();
+  page.rows.forEach(p => {
+    const brand = p.brand || "No brand";
+    if (!groups.has(brand)) groups.set(brand, []);
+    groups.get(brand).push(p);
+  });
+
+  const row = (p, actions) => `
+    <div class="wrow">
+      <span class="swatch" style="background:${esc(p.hex)}"></span>
+      <span class="nm" data-paint="${p.id}">${esc(p.name)}${
+        p.code ? ` <span class="code">${esc(p.code)}</span>` : ""}</span>
+      <span class="meta">${esc([p.range, p.type].filter(Boolean).join(" · "))}${
+        p.usedOn ? ` · on ${plural(p.usedOn, "mini", "minis")}` : ""}</span>
+      ${actions}
+    </div>`;
+
+  const listed = groups.size ? [...groups].map(([brand, rows]) => `
+    <div class="wgroup">
+      <div class="whead">${esc(brand)}<span>${plural(rows.length, "paint")}</span></div>
+      ${rows.map(p => row(p, `
+        <button class="btn ghost small got" data-got="${p.id}">Got it</button>
+        <span class="x" data-drop="${p.id}" title="Take off the list">✕</span>`)).join("")}
+    </div>`).join("")
+    : `<div class="card"><div class="empty"><strong>Nothing on the list.</strong>
+         Tick “Wishlist” on any paint — or take one of the suggestions below.</div></div>`;
+
+  const missing = page.missing.length ? `
+    <div class="card" style="margin-top:16px">
+      <h2>Used on your minis but not owned</h2>
+      <div class="sub" style="margin:2px 0 0">
+        Recorded on something you've painted, with no pot in the rack —
+        borrowed, used at a club, or run dry.</div>
+      <div class="divider"></div>
+      ${page.missing.map(p => row(p, `
+        <button class="btn ghost small want" data-want="${p.id}">Add to list</button>`)).join("")}
+      <div style="padding:10px 0 2px">
+        <button class="btn ghost" id="w-all">Add all ${page.missing.length}</button>
+      </div>
+    </div>` : "";
+
+  setContent(`
+    <div class="page-head">
+      <div><h1>Wishlist</h1>
+        <div class="sub">${page.rows.length
+          ? `${plural(page.rows.length, "paint")} to buy` : "Nothing to buy"}${
+          page.missing.length ? ` · ${page.missing.length} suggested` : ""}</div></div>
+      <div class="spacer"></div>
+      ${page.rows.length ? `<button class="btn" id="w-copy">Copy list</button>` : ""}
+    </div>
+    <div class="card">${listed}</div>
+    ${missing}`);
+
+  const flags = async (id, owned, want, msg) => {
+    await call(App().SetPaintFlags, id, owned, want);
+    if (msg) toast(msg);
+    renderWishlist();
+  };
+  content().querySelectorAll("[data-got]").forEach(b => {
+    // Buying it is the end of the list entry, so ticking it off does both
+    // halves at once rather than leaving it owned and still wanted.
+    b.onclick = () => flags(+b.dataset.got, true, false, "Added to the rack");
+  });
+  content().querySelectorAll("[data-drop]").forEach(b => {
+    const p = page.rows.find(x => x.id === +b.dataset.drop);
+    b.onclick = () => flags(+b.dataset.drop, !!(p && p.owned), false);
+  });
+  content().querySelectorAll("[data-want]").forEach(b => {
+    b.onclick = () => flags(+b.dataset.want, false, true);
+  });
+  content().querySelectorAll(".wrow .nm").forEach(el => {
+    el.onclick = () => {
+      const p = [...page.rows, ...page.missing].find(x => x.id === +el.dataset.paint);
+      if (p) paintDialog(p);
+    };
+  });
+
+  const all = $("#w-all");
+  if (all) all.onclick = async () => {
+    for (const p of page.missing) await call(App().SetPaintFlags, p.id, false, true);
+    toast(`Added ${plural(page.missing.length, "paint")}`);
+    renderWishlist();
+  };
+  const copy = $("#w-copy");
+  if (copy) copy.onclick = async () => {
+    const lines = [`Sablewright wishlist — ${prettyDate(todayISO())}`, ""];
+    groups.forEach((rows, brand) => {
+      lines.push(brand);
+      rows.forEach(p => lines.push(`  ${p.name}${
+        p.range ? ` — ${p.range}` : ""}${p.code ? ` (${p.code})` : ""}`));
+      lines.push("");
+    });
+    await call(App().CopyText, lines.join("\n").trim() + "\n");
+    toast("Wishlist copied");
+  };
+}
+
 /* ===================================================================== TIPS */
 async function renderTips() {
   const f = state.tips;
-  const tips = await call(App().ListTips, { search: f.search, category: f.category });
+  const [tips, allPaints] = await Promise.all([
+    call(App().ListTips, { search: f.search, category: f.category }),
+    call(App().AllPaints),
+  ]);
+  const byId = new Map((allPaints || []).map(p => [p.id, p]));
 
   const cards = tips.length ? `<div class="tip-grid">${tips.map(t => {
     const col = TIP_COLORS[t.category] || "#6b7280";
@@ -712,6 +1180,7 @@ async function renderTips() {
         <div class="head"><h3>${esc(t.title)}</h3>
           <span class="badge" style="background:${col}">${esc(t.category)}</span></div>
         <div class="notes">${lines.map(l => `<p>${esc(l.trim())}</p>`).join("")}</div>
+        ${paintChips(t.paintIds, byId)}
         ${(t.tags || []).length ? `<div class="tags">${
           t.tags.slice(0, 6).map(x => `<span>#${esc(x)}</span>`).join("")}</div>` : ""}
       </div></div>`;
@@ -739,6 +1208,72 @@ async function renderTips() {
   content().querySelectorAll(".tip").forEach(c => {
     c.onclick = () => tipDialog(tips.find(t => t.id === +c.dataset.id));
   });
+}
+
+/* ---------------------------------------------------------- paint picker */
+// Two dialogs pick paints the same way - the ones used on a mini, and the
+// ones a recipe calls for - so the control is built once here. The caller
+// owns the state; this turns it into markup and says what was clicked.
+//
+// prefix namespaces the element ids, because the screen behind the dialog
+// keeps its own filter bar in the document and an id shared with it resolves
+// to whichever came first.
+function paintPicker(prefix, allPaints, chosen, filter, note) {
+  if (!allPaints.length) return `<div class="note">${note.empty}</div>`;
+
+  const q = filter.search.toLowerCase();
+  const brands = [...new Set(allPaints.map(p => p.brand).filter(Boolean))]
+    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  // The rack holds the whole catalogue, so float the paints that are actually
+  // on the desk - owned, or already ticked - to the top.
+  const matched = allPaints
+    .filter(p => filter.brand === "All brands" || p.brand === filter.brand)
+    .filter(p => !q || (p.name + " " + p.brand + " " + p.range + " " + p.code)
+      .toLowerCase().includes(q))
+    .sort((a, b) => (chosen.has(b.id) - chosen.has(a.id)) || (b.owned - a.owned));
+  const list = matched.slice(0, PICKER_LIMIT);
+
+  return `
+    <div class="filters">
+      ${searchBox(`${prefix}-psearch`, "Filter paints…", filter.search)}
+      ${selectBox(`${prefix}-pbrand`, ["All brands", ...brands], filter.brand)}
+    </div>
+    <div style="color:var(--muted);font-size:13px;margin:0 0 8px">
+      ${note.lead} Ones you own are listed first${
+        matched.length > list.length
+          ? `, and only the first ${list.length} of ${matched.length} are shown —
+             keep typing to narrow it down` : ""}.${
+        chosen.size ? ` ${plural(chosen.size, "paint")} ticked so far —
+          narrowing the filters hides rows but never unticks them.` : ""}</div>
+    <div class="picker" id="${prefix}-picker">${list.map(p => `
+      <label><input type="checkbox" data-pid="${p.id}"${chosen.has(p.id) ? " checked" : ""}>
+        <span class="swatch" style="background:${esc(p.hex)};width:16px;height:16px"></span>
+        <span>${esc(p.name)}</span>
+        <span class="meta">${esc(p.brand)}${p.range ? " " + esc(p.range) : ""} · ${
+          esc(p.type)}${p.owned ? "" : " · not owned"}</span></label>`).join("")}</div>`;
+}
+
+// onFilter re-renders the dialog around the picker; onToggle is handed the
+// paint that was ticked or unticked and the state it landed in.
+function wirePaintPicker(prefix, filter, onFilter, onToggle) {
+  const search = $(`#${prefix}-psearch`);
+  if (!search) return; // an empty rack draws the note instead
+  search.oninput = debounce(() => { filter.search = search.value; onFilter(); }, 150);
+  $(`#${prefix}-pbrand`).onchange = e => { filter.brand = e.target.value; onFilter(); };
+  document.querySelectorAll(`#${prefix}-picker input`).forEach(cb => {
+    cb.onchange = () => onToggle(+cb.dataset.pid, cb.checked);
+  });
+}
+
+// The paints on a mini or in a recipe, drawn as swatches. ids are resolved
+// against the rack rather than stored alongside the name, so renaming a paint
+// or correcting its color updates every place it is used.
+function paintChips(ids, byId) {
+  const chosen = (ids || []).map(id => byId.get(id)).filter(Boolean);
+  if (!chosen.length) return "";
+  return `<div class="chips">${chosen.map(p => `
+    <span class="chip"><span class="swatch" style="background:${esc(p.hex)}"></span>${
+      esc(p.name)}</span>`).join("")}</div>`;
 }
 
 /* =================================================================== MODALS */
@@ -771,44 +1306,45 @@ function escClose(e) { if (e.key === "Escape") closeModal(); }
 async function modelDialog(model, opts = {}) {
   const isNew = !model;
   let m = model ? { ...model } : {
-    id: 0, name: "", gameSystem: "", faction: "", status: "Backlog",
-    favorite: false, notes: "", started: new Date().toISOString().slice(0, 10),
+    id: 0, name: "", gameSystem: "", faction: "", project: "", status: "Backlog",
+    count: 1, done: 0, favorite: false, notes: "",
+    started: new Date().toISOString().slice(0, 10),
     completed: "", paintIds: [], photos: [],
   };
   let tab = opts.tab || "details";
-  let paintSearch = "";
-  let paintBrand = "All brands";
+  const paintFilter = { search: "", brand: "All brands" };
   // the log entry currently being edited, {} = new
   let editSession = opts.session ? { ...opts.session } : {};
-  const allPaints = await call(App().AllPaints);
-  // The whole rack is already in hand, so the brand list comes off it rather
-  // than out of a second trip to the backend.
-  const pickerBrands = [...new Set(allPaints.map(p => p.brand).filter(Boolean))]
-    .sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  const [allPaints, facets] = await Promise.all([
+    call(App().AllPaints), call(App().ModelFacets),
+  ]);
 
   function render() {
     const chosen = new Set(m.paintIds || []);
-    const q = paintSearch.toLowerCase();
-    // The rack holds the whole catalogue, so float the paints that are
-    // actually on the desk — owned, or already ticked — to the top.
-    const matched = allPaints
-      .filter(p => paintBrand === "All brands" || p.brand === paintBrand)
-      .filter(p => !q || (p.name + " " + p.brand + " " + p.range + " " + p.code)
-        .toLowerCase().includes(q))
-      .sort((a, b) => (chosen.has(b.id) - chosen.has(a.id)) || (b.owned - a.owned));
-    const list = matched.slice(0, PICKER_LIMIT);
 
     const details = `
       <div class="field"><label>Name</label>
         <input type="text" id="f-name" value="${esc(m.name)}" autofocus></div>
-      <div class="grid2">
+      <div class="grid3">
         <div class="field"><label>Game system</label>
-          <input type="text" id="f-sys" value="${esc(m.gameSystem)}"></div>
+          ${suggestBox("f-sys", m.gameSystem, facets.systems, "e.g. Warhammer 40,000")}</div>
         <div class="field"><label>Faction / unit</label>
-          <input type="text" id="f-fac" value="${esc(m.faction)}"></div>
+          ${suggestBox("f-fac", m.faction, facets.factions, "e.g. Death Guard")}</div>
+        <div class="field"><label>Project <span class="opt">(optional)</span></label>
+          ${suggestBox("f-proj", m.project, facets.projects, "e.g. Tournament list")}</div>
       </div>
       <div class="grid3">
         <div class="field"><label>Status</label>${selectBox("f-status", STATUSES, m.status)}</div>
+        <div class="field"><label>How many minis</label>
+          <input type="text" id="f-count" inputmode="numeric" value="${m.count || 1}">
+          <div class="hint">A squad is one entry — say how many it holds.</div>
+        </div>
+        <div class="field"><label>Painted so far</label>
+          <input type="text" id="f-painted" inputmode="numeric" value="${m.done || 0}">
+          <div class="hint">Filled in for you when this goes Complete.</div>
+        </div>
+      </div>
+      <div class="grid2">
         <div class="field"><label>Started</label>
           <input type="date" id="f-started" value="${esc(m.started)}"></div>
         <div class="field"><label>Finished</label>
@@ -819,26 +1355,11 @@ async function modelDialog(model, opts = {}) {
       <div class="field"><label>Notes for this mini</label>
         <textarea id="f-notes" placeholder="One step per line…">${esc(m.notes)}</textarea></div>`;
 
-    const paintsTab = allPaints.length ? `
-      <div class="filters">
-        ${searchBox("f-psearch", "Filter paints…", paintSearch)}
-        ${selectBox("f-pbrand", ["All brands", ...pickerBrands], paintBrand)}
-      </div>
-      <div style="color:var(--muted);font-size:13px;margin:0 0 8px">
-        Tick every paint you used on this mini. Ones you own are listed first${
-          matched.length > list.length
-            ? `, and only the first ${list.length} of ${matched.length} are shown —
-               keep typing to narrow it down` : ""}.${
-          chosen.size ? ` ${plural(chosen.size, "paint")} ticked so far —
-            narrowing the filters hides rows but never unticks them.` : ""}</div>
-      <div class="picker">${list.map(p => `
-        <label><input type="checkbox" data-pid="${p.id}"${chosen.has(p.id) ? " checked" : ""}>
-          <span class="swatch" style="background:${esc(p.hex)};width:16px;height:16px"></span>
-          <span>${esc(p.name)}</span>
-          <span class="meta">${esc(p.brand)}${p.range ? " " + esc(p.range) : ""} · ${
-            esc(p.type)}${p.owned ? "" : " · not owned"}</span></label>`).join("")}</div>`
-      : `<div class="note">Your paint rack is empty. Add some paints in Paint Inventory
-           first, then come back and tick the ones you used.</div>`;
+    const paintsTab = paintPicker("f", allPaints, chosen, paintFilter, {
+      lead: "Tick every paint you used on this mini.",
+      empty: `Your paint rack is empty. Add some paints in Paint Inventory
+              first, then come back and tick the ones you used.`,
+    });
 
     const photosTab = `
       ${isNew && !m.id ? `<div class="note">Photos are saved straight to disk, so this
@@ -849,10 +1370,12 @@ async function modelDialog(model, opts = {}) {
       </div>
       <div class="photos">${(m.photos || []).map(p => `
         <div class="photo">
-          <img src="/photos/${encodeURIComponent(p.file)}" alt="">
+          <img src="${photoSrc(p)}" alt="" loading="lazy">
           <div class="cap">
             <span class="badge" style="background:${
               p.kind === "Final" ? STATUS_COLORS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span>
+            <span class="pick${p.cover ? " on" : ""}" data-cover="${p.id}"
+              title="Use this as the cover in the list">${p.cover ? "★" : "☆"}</span>
             <span class="x" data-photo="${p.id}">✕</span></div>
         </div>`).join("") || `<div style="color:var(--muted);font-size:13px">
           No photos yet. Add a progress shot or a final picture.</div>`}</div>`;
@@ -933,12 +1456,20 @@ async function modelDialog(model, opts = {}) {
     const del = $("#del");
     if (del) del.onclick = async () => {
       const ok = await call(App().Confirm, "Delete mini",
-        `Delete “${m.name}” and its photos?\nThis can't be undone.`, "Delete");
+        `Delete “${m.name}”?\nIt goes to the trash for 30 days, photos and all.`,
+        "Delete");
       if (!ok) return;
-      await call(App().DeleteModel, m.id);
+      const gone = m.id, name = m.name;
+      await call(App().DeleteModel, gone);
       // Nothing left to log the session against.
-      if (timer.modelId === m.id) clearTimer();
+      if (timer.modelId === gone) clearTimer();
       closeModal(); state.models.selected = null; show(state.screen);
+      toast(`Deleted “${name}”`, { label: "Undo", run: async () => {
+        await call(App().UndoDeleteModel, gone);
+        state.models.selected = gone;
+        show(state.screen);
+        toast("Put back");
+      } });
     };
 
     // A tab switch leaves focus on the tab button, so drop the caret somewhere
@@ -949,17 +1480,11 @@ async function modelDialog(model, opts = {}) {
       if (first) first.focus();
     }
 
-    if (tab === "paints" && allPaints.length) {
-      const ps = $("#f-psearch");
-      ps.oninput = debounce(() => { collect(); paintSearch = ps.value; render(); }, 150);
-      $("#f-pbrand").onchange = e => { paintBrand = e.target.value; render(); };
-      $("#modal").querySelectorAll(".picker input").forEach(cb => {
-        cb.onchange = () => {
-          const id = +cb.dataset.pid;
-          const set = new Set(m.paintIds || []);
-          cb.checked ? set.add(id) : set.delete(id);
-          m.paintIds = [...set];
-        };
+    if (tab === "paints") {
+      wirePaintPicker("f", paintFilter, () => { collect(); render(); }, (id, on) => {
+        const set = new Set(m.paintIds || []);
+        on ? set.add(id) : set.delete(id);
+        m.paintIds = [...set];
       });
     }
 
@@ -1005,6 +1530,12 @@ async function modelDialog(model, opts = {}) {
           if (updated) { m.photos = updated.photos || []; render(); }
         };
       });
+      $("#modal").querySelectorAll(".photo .pick").forEach(s => {
+        s.onclick = async () => {
+          const updated = await call(App().SetCoverPhoto, m.id, +s.dataset.cover);
+          if (updated) { m.photos = updated.photos || []; render(); }
+        };
+      });
     }
   }
 
@@ -1017,7 +1548,10 @@ async function modelDialog(model, opts = {}) {
       m.name = g("f-name").trim();
       m.gameSystem = g("f-sys").trim();
       m.faction = g("f-fac").trim();
+      m.project = g("f-proj").trim();
       m.status = g("f-status");
+      m.count = intOf(g("f-count"), 1);
+      m.done = intOf(g("f-painted"), 0);
       m.started = g("f-started");
       m.completed = g("f-done");
       m.notes = g("f-notes");
@@ -1043,11 +1577,10 @@ async function modelDialog(model, opts = {}) {
     const notes = $("#s-notes").value.trim();
     if (!notes) { toast("Write a line about what you did this session"); return; }
     if (!m.id && !(await ensureSaved())) return;
-    const mins = parseInt($("#s-mins").value.replace(/[^0-9]/g, ""), 10);
     const updated = await call(App().SaveSession, m.id, {
       id: editSession.id || 0,
       date: $("#s-date").value || todayISO(),
-      minutes: isNaN(mins) ? 0 : mins,
+      minutes: intOf($("#s-mins").value, 0),
       notes,
     });
     if (updated) {
@@ -1092,6 +1625,22 @@ async function paintDialog(paint) {
     a.toLowerCase().localeCompare(b.toLowerCase()));
   const ranges = facets.ranges;
 
+  // "Used on 3 minis" is a dead number: which three is the question actually
+  // being asked, and it is answerable from what's already recorded. Same for
+  // the recipes - a paint is a way into the notes that call for it.
+  const found = isNew ? { minis: [], tips: [] } : await call(App().PaintLinks, p.id);
+  const linkList = (items, cls, label) => !items.length ? "" : `
+    <div class="section">${label}</div>
+    <div class="links">${items.map(x => `
+      <span class="link ${cls}" data-id="${x.id}">${esc(x.name || x.title)}${
+        x.count > 1 ? `<span class="qty">×${x.count}</span>` : ""}</span>`).join("")}</div>`;
+  const links = isNew ? "" : `
+    ${linkList(found.minis, "to-mini", `USED ON ${plural(found.minis.length, "MINI", "MINIS")}`)}
+    ${linkList(found.tips, "to-tip", `IN ${plural(found.tips.length, "RECIPE")}`)}
+    ${!found.minis.length && !found.tips.length
+      ? `<div style="color:var(--muted);font-size:13px;margin-top:14px">
+           Not recorded on any mini or in any recipe yet.</div>` : ""}`;
+
   // Every field below carries a -f suffix. The inventory screen behind the
   // dialog stays in the document and owns the plain names for its own filter
   // bar, and it comes first, so an id shared with a filter resolves to the
@@ -1131,8 +1680,7 @@ async function paintDialog(paint) {
         Owned</label>
       <label class="check"><input type="checkbox" id="p-wish-f"${p.wishlist ? " checked" : ""}>
         Wishlist</label>
-      ${!isNew ? `<div style="color:var(--muted);font-size:13px;margin-top:14px">
-        Used on ${plural(paint.usedOn || 0, "mini", "minis")}.</div>` : ""}
+      ${links}
     </div>
     <footer>
       ${!isNew ? `<button class="btn danger" id="p-del">Delete paint</button>` : ""}
@@ -1142,6 +1690,19 @@ async function paintDialog(paint) {
     </footer>`);
 
   $("#p-name").focus();
+  // Following a link leaves the paint behind, so nothing here is saved on the
+  // way out - the dialog closes exactly as Cancel would.
+  $("#modal").querySelectorAll(".link.to-mini").forEach(el => {
+    el.onclick = () => { closeModal(); jumpToMini(+el.dataset.id); };
+  });
+  $("#modal").querySelectorAll(".link.to-tip").forEach(el => {
+    el.onclick = async () => {
+      const tip = await call(App().GetTip, +el.dataset.id);
+      closeModal();
+      if (tip) tipDialog(tip);
+    };
+  });
+
   const color = $("#p-color"), hex = $("#p-hex");
   color.oninput = () => { hex.value = color.value; };
   hex.oninput = () => { if (/^#[0-9a-f]{6}$/i.test(hex.value)) color.value = hex.value; };
@@ -1183,47 +1744,78 @@ async function paintDialog(paint) {
 }
 
 /* ---- tip ---- */
-function tipDialog(tip) {
+// A recipe written as prose is a recipe you can't search by paint, so the
+// note carries the actual paints alongside the words. The dialog re-renders
+// to filter that picker, which means the text fields have to be read back
+// into `t` first - the same collect-before-render the mini dialog does.
+async function tipDialog(tip) {
   const isNew = !tip;
-  const t = tip ? { ...tip } : { id: 0, title: "", category: "Other", body: "", tags: [] };
+  const t = tip ? { ...tip } : {
+    id: 0, title: "", category: "Other", body: "", tags: [], paintIds: [],
+  };
+  const paintFilter = { search: "", brand: "All brands" };
+  const allPaints = await call(App().AllPaints);
 
-  openModal(`
-    <header><h2>${isNew ? "Add Technique Note" : "Edit Note"}</h2><button class="close">✕</button></header>
-    <div class="mbody">
-      <div class="field"><label>Title</label>
-        <input type="text" id="t-title" value="${esc(t.title)}"></div>
-      <div class="field"><label>Category</label>${selectBox("t-cat-f", TIP_CATEGORIES, t.category)}</div>
-      <div class="field"><label>The note / recipe (one step per line)</label>
-        <textarea id="t-body" style="min-height:150px">${esc(t.body)}</textarea></div>
-      <div class="field"><label>Tags (comma separated)</label>
-        <input type="text" id="t-tags" value="${esc((t.tags || []).join(", "))}"></div>
-    </div>
-    <footer>
-      ${!isNew ? `<button class="btn danger" id="t-del">Delete note</button>` : ""}
-      <div class="spacer"></div>
-      <button class="btn ghost" id="t-cancel">Cancel</button>
-      <button class="btn" id="t-save">Save</button>
-    </footer>`);
+  function collect() {
+    const g = id => { const e = $("#" + id); return e ? e.value : undefined; };
+    if (g("t-title") === undefined) return;
+    t.title = g("t-title").trim();
+    t.category = g("t-cat-f");
+    t.body = g("t-body");
+    t.tags = g("t-tags").split(",").map(s => s.trim()).filter(Boolean);
+  }
 
-  $("#t-title").focus();
-  $("#t-cancel").onclick = closeModal;
-  $("#t-save").onclick = async () => {
-    await call(App().SaveTip, {
-      ...t,
-      title: $("#t-title").value.trim(),
-      category: $("#t-cat-f").value,
-      body: $("#t-body").value,
-      tags: $("#t-tags").value.split(",").map(s => s.trim()).filter(Boolean),
+  function render() {
+    const chosen = new Set(t.paintIds || []);
+    openModal(`
+      <header><h2>${isNew ? "Add Technique Note" : "Edit Note"}</h2><button class="close">✕</button></header>
+      <div class="mbody">
+        <div class="field"><label>Title</label>
+          <input type="text" id="t-title" value="${esc(t.title)}"></div>
+        <div class="field"><label>Category</label>${selectBox("t-cat-f", TIP_CATEGORIES, t.category)}</div>
+        <div class="field"><label>The note / recipe (one step per line)</label>
+          <textarea id="t-body" style="min-height:150px">${esc(t.body)}</textarea></div>
+        <div class="field"><label>Tags (comma separated)</label>
+          <input type="text" id="t-tags" value="${esc((t.tags || []).join(", "))}"></div>
+        <div class="section">PAINTS IN THIS RECIPE${
+          chosen.size ? ` · ${plural(chosen.size, "paint")}` : ""}</div>
+        ${paintPicker("t", allPaints, chosen, paintFilter, {
+          lead: "Tick the paints this recipe calls for.",
+          empty: `Your paint rack is empty. Add some paints in Paint Inventory
+                  first, then come back and tick the ones this recipe uses.`,
+        })}
+      </div>
+      <footer>
+        ${!isNew ? `<button class="btn danger" id="t-del">Delete note</button>` : ""}
+        <div class="spacer"></div>
+        <button class="btn ghost" id="t-cancel">Cancel</button>
+        <button class="btn" id="t-save">Save</button>
+      </footer>`);
+
+    if (!$("#modal").contains(document.activeElement)) $("#t-title").focus();
+
+    wirePaintPicker("t", paintFilter, () => { collect(); render(); }, (id, on) => {
+      const set = new Set(t.paintIds || []);
+      on ? set.add(id) : set.delete(id);
+      t.paintIds = [...set];
     });
-    closeModal(); renderTips(); toast("Saved");
-  };
-  const del = $("#t-del");
-  if (del) del.onclick = async () => {
-    const ok = await call(App().Confirm, "Delete note", `Delete “${t.title}”?`, "Delete");
-    if (!ok) return;
-    await call(App().DeleteTip, t.id);
-    closeModal(); renderTips();
-  };
+
+    $("#t-cancel").onclick = closeModal;
+    $("#t-save").onclick = async () => {
+      collect();
+      await call(App().SaveTip, t);
+      closeModal(); renderTips(); toast("Saved");
+    };
+    const del = $("#t-del");
+    if (del) del.onclick = async () => {
+      const ok = await call(App().Confirm, "Delete note", `Delete “${t.title}”?`, "Delete");
+      if (!ok) return;
+      await call(App().DeleteTip, t.id);
+      closeModal(); renderTips();
+    };
+  }
+
+  render();
 }
 
 /* ===================================================================== boot */
@@ -1243,6 +1835,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initTheme();
   await ready();
   initNav();
+  initKeys();
   // The build names itself rather than carrying a string the source has to
   // remember to update - the linker stamps it in, so it can't go stale.
   App().Version().then(v => { $("#version").textContent = v; });
