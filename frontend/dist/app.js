@@ -442,8 +442,9 @@ function initKeys() {
 
 function show(screen) {
   state.screen = screen;
-  ({ dashboard: renderDashboard, models: renderModels, paints: renderPaints,
-     wishlist: renderWishlist, tips: renderTips, time: renderTime })[screen]();
+  ({ dashboard: renderDashboard, models: renderModels, projects: renderProjects,
+     paints: renderPaints, wishlist: renderWishlist, tips: renderTips,
+     time: renderTime })[screen]();
 }
 
 // Landing on a mini from somewhere else - a log entry on the dashboard, a
@@ -856,6 +857,130 @@ async function renderPaints() {
       if (p) paintDialog(p);
     };
   });
+}
+
+/* ================================================================= PROJECTS */
+// A project is not a record you create - it is whatever minis say they belong
+// to, exactly as a brand is whatever paints say they are. This screen reads
+// that name and adds up what's behind it; the only things stored here are the
+// deadline and the notes, which have nowhere else to live.
+async function renderProjects() {
+  const projects = await call(App().Projects);
+
+  // "in 9 days", "today", "3 days over" - a countdown is what a deadline is
+  // for, and the date alone makes you do the arithmetic yourself.
+  const countdown = p => {
+    if (!p.due) return "";
+    const d = p.daysLeft;
+    const when = d === 0 ? "due today"
+      : d > 0 ? `${plural(d, "day")} left`
+      : `${plural(-d, "day")} over`;
+    return `<span class="due${d < 0 ? " over" : d <= 7 ? " soon" : ""}">${
+      when} · ${prettyDate(p.due)}</span>`;
+  };
+
+  const cards = projects.length ? projects.map(p => `
+    <div class="card project" data-name="${esc(p.name)}">
+      <div class="phead">
+        <h2>${esc(p.name)}</h2>
+        ${countdown(p)}
+        <span class="spacer"></span>
+        <button class="btn ghost small" data-edit="${esc(p.name)}">Edit</button>
+      </div>
+      <div class="pstats">
+        <span><strong>${p.done}</strong> of <strong>${p.minis}</strong> minis painted</span>
+        <span>${plural(p.entries, "entry", "entries")}</span>
+        ${p.minutes ? `<span>${duration(p.minutes)} across ${
+          plural(p.sessions, "session")}</span>` : ""}
+        ${p.minis && p.minutes ? `<span>${duration(Math.round(p.minutes / p.minis))} a mini</span>` : ""}
+      </div>
+      ${progressBar(p.done, Math.max(p.minis, 2))}
+      ${p.notes ? `<div class="pnotes">${esc(p.notes)}</div>` : ""}
+      ${p.next.length ? `<div class="section">NEXT UP</div>
+        <div class="links">${p.next.map(n => `
+          <span class="link to-mini" data-id="${n.id}">${esc(n.name)}${
+            n.count > 1 ? `<span class="qty">${n.done}/${n.count}</span>` : ""}</span>`).join("")}</div>`
+        : `<div class="pnotes">Everything filed under this is finished.</div>`}
+      <div class="divider"></div>
+      <div class="pfoot"><span class="open" data-open="${esc(p.name)}">
+        Show these ${plural(p.entries, "entry", "entries")} in Models →</span></div>
+    </div>`).join("")
+    : `<div class="card"><div class="empty"><strong>No projects yet.</strong>
+         Put a project name on a mini — an army, a tournament list, a boxed
+         game — and it shows up here with everything else that shares it.</div></div>`;
+
+  setContent(`
+    <div class="page-head">
+      <div><h1>Projects</h1>
+        <div class="sub">What you're working towards${
+          projects.length ? ` — ${plural(projects.length, "project")}` : ""}</div></div>
+    </div>
+    <div class="project-grid">${cards}</div>`);
+
+  content().querySelectorAll("[data-edit]").forEach(b => {
+    b.onclick = () => projectDialog(projects.find(p => p.name === b.dataset.edit));
+  });
+  content().querySelectorAll("[data-open]").forEach(b => {
+    b.onclick = () => {
+      // Landing in Models with only this project showing, and the other
+      // filters cleared so nothing else is quietly hiding half of it.
+      Object.assign(state.models, { search: "", status: "All", system: "All",
+        faction: "All", project: b.dataset.open });
+      document.querySelectorAll("#nav li").forEach(n =>
+        n.classList.toggle("active", n.dataset.screen === "models"));
+      show("models");
+    };
+  });
+  content().querySelectorAll(".link.to-mini").forEach(el => {
+    el.onclick = () => jumpToMini(+el.dataset.id);
+  });
+}
+
+// Renaming is the answer to the one real weakness of grouping on free text:
+// without it, fixing a typo means editing every mini that carries it.
+function projectDialog(p) {
+  openModal(`
+    <header><h2>${esc(p.name)}</h2><button class="close">✕</button></header>
+    <div class="mbody">
+      <div class="grid2">
+        <div class="field"><label>Name</label>
+          <input type="text" id="pr-name" value="${esc(p.name)}">
+          <div class="hint">Renaming re-tags all ${plural(p.entries, "entry", "entries")}.</div>
+        </div>
+        <div class="field"><label>Deadline <span class="opt">(optional)</span></label>
+          <input type="date" id="pr-due" value="${esc(p.due)}"></div>
+      </div>
+      <div class="field"><label>Notes</label>
+        <textarea id="pr-notes" placeholder="What this is for, what's left…">${esc(p.notes)}</textarea></div>
+      <div class="note">Clearing the name ungroups these minis without deleting
+        anything — they stay exactly as they are, just filed under nothing.</div>
+    </div>
+    <footer>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="pr-cancel">Cancel</button>
+      <button class="btn" id="pr-save">Save</button>
+    </footer>`);
+
+  $("#pr-name").focus();
+  $("#pr-cancel").onclick = closeModal;
+  $("#pr-save").onclick = async () => {
+    const name = $("#pr-name").value.trim();
+    // The rename has to land first: the metadata is keyed by name, and
+    // saving it under the old one would leave it behind on a project that
+    // no longer exists.
+    if (name !== p.name) {
+      const moved = await call(App().RenameProject, p.name, name);
+      if (!name) {
+        closeModal(); renderProjects();
+        toast(`Ungrouped ${plural(moved, "mini", "minis")}`);
+        return;
+      }
+    }
+    await call(App().SaveProject, {
+      name, due: $("#pr-due").value, notes: $("#pr-notes").value.trim(),
+    });
+    closeModal(); renderProjects(); toast("Saved");
+  };
 }
 
 /* ===================================================================== TIME */
