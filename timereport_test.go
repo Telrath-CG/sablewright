@@ -1,6 +1,8 @@
 package main
 
 import (
+	"image/color"
+	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,6 +165,99 @@ func TestExportMarkdownCopiesThePhotosBeside(t *testing.T) {
 	b, _ := os.ReadFile(path)
 	if !strings.Contains(string(b), "![Final](hero-photos/m1_1.jpg)") {
 		t.Errorf("the note does not link the photo it copied:\n%s", b)
+	}
+}
+
+// writePhoto puts a real, decodable image in the store's photo folder. The
+// HTML exporter re-encodes what it embeds, so a file of made-up bytes would
+// be silently dropped and the test would pass for the wrong reason.
+func writePhoto(t *testing.T, s *Store, name string) {
+	t.Helper()
+	if err := os.MkdirAll(s.PhotoDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(s.PhotoDir(), name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	img := filled(8, 8, func(x, y int) color.RGBA { return color.RGBA{uint8(x * 8), uint8(y * 8), 40, 255} })
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An export is handed to someone else as a record of the painter's own work.
+// The maker's product photograph is not that, so neither exporter carries it
+// however the mini is otherwise set up.
+func TestExportLeavesTheProductShotOut(t *testing.T) {
+	s := newTempStore(t)
+	writePhoto(t, s, "m1_final.png")
+	writePhoto(t, s, "m1_product.png")
+	s.data = Data{NextID: 100, Models: []Model{{
+		ID: 1, Name: "Hero", Status: "Complete", Count: 1,
+		Photos: []Photo{
+			{ID: 3, File: "m1_final.png", Kind: "Final"},
+			{ID: 4, File: "m1_product.png", Kind: "Product"},
+		},
+	}}}
+	a := &App{store: s}
+	m, _ := s.ModelByID(1)
+
+	htmlPath := filepath.Join(t.TempDir(), "hero.html")
+	if err := a.exportHTML(m, nil, htmlPath); err != nil {
+		t.Fatalf("exportHTML(): %v", err)
+	}
+	page, _ := os.ReadFile(htmlPath)
+	// The kind is written as the caption under each shot, so counting the
+	// captions is the same as counting what got embedded.
+	if strings.Contains(string(page), "Product") {
+		t.Error("the exported page carries the product shot")
+	}
+	if !strings.Contains(string(page), "Final") {
+		t.Error("the exported page dropped the painter's own photo")
+	}
+
+	mdPath := filepath.Join(t.TempDir(), "hero.md")
+	if err := a.exportMarkdown(m, nil, mdPath); err != nil {
+		t.Fatalf("exportMarkdown(): %v", err)
+	}
+	note, _ := os.ReadFile(mdPath)
+	if strings.Contains(string(note), "m1_product.png") {
+		t.Error("the exported note links the product shot")
+	}
+	beside := filepath.Join(filepath.Dir(mdPath), "hero-photos")
+	if _, err := os.Stat(filepath.Join(beside, "m1_product.png")); err == nil {
+		t.Error("the product shot was copied beside the note")
+	}
+	if _, err := os.Stat(filepath.Join(beside, "m1_final.png")); err != nil {
+		t.Errorf("the painter's own photo was not copied beside the note: %v", err)
+	}
+}
+
+// A mini whose only image is the product shot has nothing to export. The
+// filtering happens before the folder is made, so it should not be left with
+// an empty photos folder and a heading over nothing.
+func TestExportMakesNoPhotoFolderForAProductShotAlone(t *testing.T) {
+	s := newTempStore(t)
+	writePhoto(t, s, "m1_product.png")
+	s.data = Data{NextID: 100, Models: []Model{{
+		ID: 1, Name: "Hero", Status: "Backlog", Count: 1,
+		Photos: []Photo{{ID: 4, File: "m1_product.png", Kind: "Product"}},
+	}}}
+	a := &App{store: s}
+	m, _ := s.ModelByID(1)
+
+	path := filepath.Join(t.TempDir(), "hero.md")
+	if err := a.exportMarkdown(m, nil, path); err != nil {
+		t.Fatalf("exportMarkdown(): %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(path), "hero-photos")); err == nil {
+		t.Error("an empty photos folder was written beside the note")
+	}
+	note, _ := os.ReadFile(path)
+	if strings.Contains(string(note), "## Photos") {
+		t.Error("the note has a Photos heading with nothing under it")
 	}
 }
 

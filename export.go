@@ -174,8 +174,15 @@ func (a *App) exportHTML(m Model, paints []Paint, path string) error {
 	}
 	b.WriteString("</div>\n")
 
+	// Reference shots are left out here and in the Markdown export below. An
+	// export is the finished article and the work that went into it, and the
+	// maker's marketing photograph is neither - handing someone a page that
+	// opens on a studio paint job would misrepresent whose work it is.
 	var shots []string
 	for _, p := range m.Photos {
+		if reference(p.Kind) {
+			continue
+		}
 		if uri := a.exportPhoto(p.File); uri != "" {
 			shots = append(shots, fmt.Sprintf(
 				"<figure><img src=\"%s\" alt=\"\"><figcaption>%s</figcaption></figure>",
@@ -249,13 +256,24 @@ func (a *App) exportMarkdown(m Model, paints []Paint, path string) error {
 	// The photos are copied rather than embedded, since Markdown has nowhere
 	// to put an image. The folder is named after the file so the two stay
 	// recognisably a pair wherever they end up.
-	if len(m.Photos) > 0 {
+	//
+	// Reference shots are filtered before the folder is made rather than
+	// skipped inside the loop: a mini whose only image is the product shot
+	// would otherwise get an empty folder and a Photos heading with nothing
+	// under it.
+	var shots []Photo
+	for _, p := range m.Photos {
+		if !reference(p.Kind) {
+			shots = append(shots, p)
+		}
+	}
+	if len(shots) > 0 {
 		dir := strings.TrimSuffix(path, filepath.Ext(path)) + "-photos"
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 		b.WriteString("\n## Photos\n\n")
-		for _, p := range m.Photos {
+		for _, p := range shots {
 			src := filepath.Join(a.store.PhotoDir(), p.File)
 			raw, err := os.ReadFile(src)
 			if err != nil {

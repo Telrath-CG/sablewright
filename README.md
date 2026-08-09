@@ -35,9 +35,9 @@ fits — they install to `/usr/bin` and add a menu entry, rather than leaving a
 file to keep track of:
 
 ```
-sudo apt install ./sablewright_1.1.0_amd64.deb
-sudo dnf install ./sablewright-1.1.0-1.x86_64.rpm
-sudo pacman -U sablewright-1.1.0-1-x86_64.pkg.tar.zst
+sudo apt install ./sablewright_1.2.0_amd64.deb
+sudo dnf install ./sablewright-1.2.0-1.x86_64.rpm
+sudo pacman -U sablewright-1.2.0-1-x86_64.pkg.tar.zst
 ```
 
 All three depend on GTK 3 and WebKit2GTK 4.1, which current distributions ship
@@ -137,10 +137,24 @@ Click a photo to open it full size.
 
 A thumbnail is generated on import and is what the app actually draws, so a
 mini with a dozen progress shots costs a fraction of the memory it used to;
-the original is never touched and is still what opens when you click. The star
-on a photo makes it that mini's cover — the shot shown beside it in the list.
-Choose nothing and the newest final photo stands in, falling back to the
-newest progress shot.
+the original is never touched and is still what opens when you click.
+
+Photos come in three kinds. *Progress* and *Final* are your own work. A
+*reference* is the maker's product image — the painted example off the box or
+the shop page — added the same way, from a file you've saved yourself. Its job
+is to be recognisable: a backlog is mostly minis you haven't photographed,
+and a row with the studio paint job on it is far easier to pick out than
+another blank square. It's also what you're working towards, so it's there to
+look at while you paint.
+
+The star on a photo makes it that mini's cover — the shot shown beside it in
+the list — and that choice always wins. Choose nothing and the cover follows
+where the mini has got to: the reference stands in while it's still on the
+desk, and the newest final photo takes over once it's finished, falling back
+to the newest progress shot when there's no final.
+
+Reference shots are left out of exports. An export is a record of your own
+work to hand to someone else, and the manufacturer's photograph isn't that.
 
 ---
 
@@ -272,7 +286,7 @@ three formats, with no root and no containers involved:
 
 ```
 go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
-export VERSION=1.1.0
+export VERSION=1.2.0
 nfpm pkg -f build/linux/nfpm.yaml --packager deb       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager rpm       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager archlinux --target build/bin/
@@ -293,7 +307,7 @@ scripts read the same field and hand it to the linker along with the short
 commit hash:
 
 ```
--ldflags "-w -s -X main.version=1.1.0 -X main.commit=73ec59c"
+-ldflags "-w -s -X main.version=1.2.0 -X main.commit=73ec59c"
 ```
 
 The sidebar shows whatever was stamped in, which is why it reports the commit

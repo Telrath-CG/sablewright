@@ -224,24 +224,34 @@ func TestStatsCountsMinisRatherThanEntries(t *testing.T) {
 }
 
 // The list draws one shot per mini, and which one it is has to be worth
-// looking at: the finished article beats a shot of bare primer, and an
-// explicit choice beats both.
+// looking at: the finished article beats a shot of bare primer, the maker's
+// reference stands in until there is a finished article to show, and an
+// explicit choice beats all of it.
 func TestCoverPhotoPicksTheShotWorthShowing(t *testing.T) {
 	progress := Photo{ID: 1, File: "a.jpg", Kind: "Progress"}
 	final := Photo{ID: 2, File: "b.jpg", Kind: "Final"}
 	chosen := Photo{ID: 3, File: "c.jpg", Kind: "Progress", Cover: true}
+	product := Photo{ID: 4, File: "d.jpg", Kind: "Product"}
 
 	for _, c := range []struct {
 		what   string
+		status string
 		photos []Photo
 		want   int
 	}{
-		{"nothing at all", nil, 0},
-		{"only progress shots", []Photo{progress}, 1},
-		{"a final among them", []Photo{progress, final}, 2},
-		{"an explicit choice", []Photo{progress, final, chosen}, 3},
+		{"nothing at all", "In Progress", nil, 0},
+		{"only progress shots", "In Progress", []Photo{progress}, 1},
+		{"a final among them", "In Progress", []Photo{progress, final}, 2},
+		{"an explicit choice", "In Progress", []Photo{progress, final, chosen}, 3},
+		// The two halves of the default: the same photos read differently
+		// depending on whether the painting is over.
+		{"a product shot while painting", "In Progress", []Photo{progress, product}, 4},
+		{"a product shot once finished", "Complete", []Photo{progress, final, product}, 2},
+		{"a product shot and no final", "Complete", []Photo{progress, product}, 4},
+		{"a product shot the painter overrode", "In Progress", []Photo{product, chosen}, 3},
+		{"nothing but a product shot", "Backlog", []Photo{product}, 4},
 	} {
-		got := Model{Photos: c.photos}.CoverPhoto()
+		got := Model{Status: c.status, Photos: c.photos}.CoverPhoto()
 		if c.want == 0 {
 			if got != nil {
 				t.Errorf("CoverPhoto() with %s = %v, want nil", c.what, got)

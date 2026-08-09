@@ -340,7 +340,10 @@ func isHexColor(s string) bool {
 // app's own photo folder, so moving or deleting the originals is harmless.
 func (a *App) AddPhotos(modelID int, kind string) (*Model, error) {
 	paths, err := wruntime.OpenMultipleFilesDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title: "Choose photo" + map[string]string{"Final": " (final)"}[kind],
+		Title: "Choose photo" + map[string]string{
+			"Final":   " (final)",
+			"Product": " (product image)",
+		}[kind],
 		Filters: []wruntime.FileFilter{
 			{DisplayName: "Images (*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp)",
 				Pattern: "*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp"},
