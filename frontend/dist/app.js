@@ -11,6 +11,17 @@ const STATUS_COLORS = {
   "Backlog": "#9aa0a6", "Assembled": "#64748b", "Primed": "#8b5cf6",
   "In Progress": "#f59e0b", "Complete": "#22a06b", "Display": "#2563eb",
 };
+// Mirrors finished() in the store: the statuses that mean the painting is over.
+const isFinished = status => status === "Complete" || status === "Display";
+// A photo's badge. The painter's finished shot borrows the Complete green;
+// the maker's reference gets a hue of its own, so it never reads as one of
+// the stages of the work; anything else is a progress shot.
+const PHOTO_COLORS = { "Final": STATUS_COLORS["Complete"], "Product": "#0891b2" };
+const photoColor = kind => PHOTO_COLORS[kind] || "#64748b";
+// Product and Final are the two named kinds; everything else, including a
+// kind written by a build that predates this one, is a progress shot. Mirrors
+// the default branch of CoverPhoto in the store.
+const photoGroup = p => (p.kind === "Product" || p.kind === "Final") ? p.kind : "Progress";
 const PAINT_TYPES = ["Base", "Layer", "Shade", "Contrast", "Dry", "Technical",
                      "Air", "Primer", "Metallic", "Wash", "Glaze", "Ink", "Other"];
 // The rack ships with well over a thousand paints, and every keystroke in the
@@ -138,15 +149,23 @@ function photoSrc(p) {
   return `/photos/${encodeURIComponent(p.thumb || p.file)}`;
 }
 
-// The shot that stands for a mini in the list: an explicit choice first, then
-// the newest final photo, then the newest progress one. Mirrors CoverPhoto in
-// the store, which is what every other reader of this goes through.
+// The shot that stands for a mini in the list. An explicit choice wins;
+// failing that a finished mini is represented by the finished article and one
+// still on the desk by the maker's reference, since a row is picked out of a
+// list by eye and a studio photograph is the more recognisable of the two.
+// Within a kind the newest wins.
+//
+// Mirrors CoverPhoto in the store. The two have to agree: they draw the same
+// square from the same data, and a list that disagrees with the record behind
+// it is worse than either rule on its own.
 function coverPhoto(m) {
   const photos = m.photos || [];
-  return photos.find(p => p.cover)
-    || [...photos].reverse().find(p => p.kind === "Final")
-    || photos[photos.length - 1]
-    || null;
+  const chosen = photos.find(p => p.cover);
+  if (chosen) return chosen;
+  const newest = kind => [...photos].reverse().find(p => photoGroup(p) === kind);
+  const product = newest("Product"), final = newest("Final"), progress = newest("Progress");
+  return (isFinished(m.status) ? [final, product, progress]
+                               : [product, final, progress]).find(Boolean) || null;
 }
 
 // The collection is measured in minis, and the entries are how they're filed.
@@ -677,7 +696,7 @@ async function renderModelDetail(id) {
     <div class="photo">
       <img src="${photoSrc(p)}" alt="" data-file="${esc(p.file)}" loading="lazy">
       <div class="cap"><span class="badge" style="background:${
-        p.kind === "Final" ? STATUS_COLORS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span>${
+        photoColor(p.kind)};font-size:10px">${esc(p.kind)}</span>${
         p.cover ? `<span class="is-cover" title="Cover shot">★</span>` : ""}</div>
     </div>`).join("")
     : `<div style="color:var(--muted);font-size:13px">No photos yet — add progress shots when you edit this mini.</div>`;
@@ -1361,24 +1380,45 @@ async function modelDialog(model, opts = {}) {
               first, then come back and tick the ones you used.`,
     });
 
-    const photosTab = `
-      ${isNew && !m.id ? `<div class="note">Photos are saved straight to disk, so this
-        mini needs a name and a save first. Add a photo and it'll be saved automatically.</div>` : ""}
-      <div style="display:flex;gap:8px;margin-bottom:14px">
-        <button class="btn ghost" id="add-prog">+&nbsp; Add progress photo</button>
-        <button class="btn ghost" id="add-final">+&nbsp; Add final photo</button>
-      </div>
-      <div class="photos">${(m.photos || []).map(p => `
+    const photoTile = p => `
         <div class="photo">
           <img src="${photoSrc(p)}" alt="" loading="lazy">
           <div class="cap">
             <span class="badge" style="background:${
-              p.kind === "Final" ? STATUS_COLORS["Complete"] : "#64748b"};font-size:10px">${esc(p.kind)}</span>
+              photoColor(p.kind)};font-size:10px">${esc(p.kind)}</span>
             <span class="pick${p.cover ? " on" : ""}" data-cover="${p.id}"
               title="Use this as the cover in the list">${p.cover ? "★" : "☆"}</span>
             <span class="x" data-photo="${p.id}">✕</span></div>
-        </div>`).join("") || `<div style="color:var(--muted);font-size:13px">
-          No photos yet. Add a progress shot or a final picture.</div>`}</div>`;
+        </div>`;
+
+    // Grouped rather than run together: the reference is the maker's
+    // photograph and everything else is the painter's own work, and a gallery
+    // that mixes the two invites them being read as the same thing. A group
+    // with nothing in it is left out entirely rather than drawn empty.
+    const photoSections = [
+      ["Product", "Reference", `The maker's painted example, to work towards. Stands in as
+        the cover in the list until this mini is finished, and is left out of exports.`],
+      ["Progress", "Progress", ""],
+      ["Final", "Final", ""],
+    ].map(([kind, title, blurb]) => {
+      const inKind = (m.photos || []).filter(p => photoGroup(p) === kind);
+      if (!inKind.length) return "";
+      return `<div class="section">${title.toUpperCase()}</div>${
+        blurb ? `<div class="note" style="margin-bottom:10px">${blurb}</div>` : ""
+      }<div class="photos" style="margin-bottom:16px">${inKind.map(photoTile).join("")}</div>`;
+    }).join("");
+
+    const photosTab = `
+      ${isNew && !m.id ? `<div class="note">Photos are saved straight to disk, so this
+        mini needs a name and a save first. Add a photo and it'll be saved automatically.</div>` : ""}
+      <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+        <button class="btn ghost" id="add-product">+&nbsp; Add product image</button>
+        <button class="btn ghost" id="add-prog">+&nbsp; Add progress photo</button>
+        <button class="btn ghost" id="add-final">+&nbsp; Add final photo</button>
+      </div>
+      ${photoSections || `<div style="color:var(--muted);font-size:13px">
+          No photos yet. Add the maker's product image so this mini is recognisable in
+          the list, or a progress shot to start the record.</div>`}`;
 
     const sess = m.sessions || [];
     // The modal backdrop covers the sidebar, so while this dialog is open the
@@ -1522,6 +1562,7 @@ async function modelDialog(model, opts = {}) {
     }
 
     if (tab === "photos") {
+      $("#add-product").onclick = () => addPhotos("Product");
       $("#add-prog").onclick = () => addPhotos("Progress");
       $("#add-final").onclick = () => addPhotos("Final");
       $("#modal").querySelectorAll(".photo .x").forEach(x => {

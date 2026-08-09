@@ -30,7 +30,13 @@ type Photo struct {
 	// the decoder could not read. Everywhere a thumbnail is drawn falls back
 	// to File, so an empty one costs memory rather than a broken image.
 	Thumb string `json:"thumb"`
-	Kind  string `json:"kind"`  // "Progress" or "Final"
+	// Kind is "Product", "Progress" or "Final". The first is the maker's own
+	// photograph of a painted example - a reference to work towards, not a
+	// record of work done - which is why it is the one kind an export leaves
+	// out. Nothing validates this: it is written by the caller and only ever
+	// compared against, so an unknown value reads as a progress shot rather
+	// than breaking anything.
+	Kind  string `json:"kind"`
 	Added string `json:"added"` // YYYY-MM-DD
 	// Cover marks the one photo that stands for the mini in the list. At most
 	// one per model; with none set, CoverPhoto picks the best candidate.
@@ -81,6 +87,11 @@ type Model struct {
 // a finished mini that has somewhere to stand, not a stage on the way there.
 func finished(status string) bool { return status == "Complete" || status == "Display" }
 
+// reference is true of a photo kind that belongs to the manufacturer rather
+// than to the painter. Kept as a function beside finished() so the string
+// lives in one place: the cover order and the two exporters all ask this.
+func reference(kind string) bool { return kind == "Product" }
+
 // Minis reports how many miniatures this entry stands for and how many of
 // them are painted, with both clamped into sense. A file written by an older
 // build has no count at all, and one edited by hand can say anything, so
@@ -104,26 +115,39 @@ func (m Model) Minis() (total, done int) {
 }
 
 // CoverPhoto is the shot that stands for this mini in the list, or nil if it
-// has none. An explicit choice wins; failing that a final photo beats a
-// progress one, since the finished mini is what you would point at, and the
-// newest of those wins because it is the one closest to how it looks now.
+// has none. An explicit choice always wins. Failing that the default follows
+// what the mini is: a finished one is represented by the finished article,
+// since that is what you would point at, while one still on the desk is
+// represented by the maker's reference shot, since a row is being picked out
+// of a list by eye and a studio photograph is far more recognisable than a
+// half-painted one - and most of a backlog has no photograph at all. Within a
+// kind the newest wins, being the one closest to how it looks now.
 func (m Model) CoverPhoto() *Photo {
-	var final, progress *Photo
+	var product, final, progress *Photo
 	for i := range m.Photos {
 		p := &m.Photos[i]
 		if p.Cover {
 			return p
 		}
-		if p.Kind == "Final" {
+		switch {
+		case reference(p.Kind):
+			product = p
+		case p.Kind == "Final":
 			final = p
-		} else {
+		default:
 			progress = p
 		}
 	}
-	if final != nil {
-		return final
+	order := []*Photo{product, final, progress}
+	if finished(m.Status) {
+		order = []*Photo{final, product, progress}
 	}
-	return progress
+	for _, p := range order {
+		if p != nil {
+			return p
+		}
+	}
+	return nil
 }
 
 // TotalMinutes adds up recorded session time for this mini.
