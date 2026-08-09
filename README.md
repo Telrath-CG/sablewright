@@ -4,6 +4,9 @@ A small desktop app for tracking miniature painting: what stage each mini is at,
 which paints you used, a dated log of every painting session, technique recipes,
 and progress photos.
 
+<img width="2203" height="1387" alt="dashboard" src="https://github.com/user-attachments/assets/64fc59d9-124e-4b37-b73e-3133b83f19a4" />
+
+
 ---
 
 ## Getting it
