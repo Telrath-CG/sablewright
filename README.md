@@ -8,9 +8,9 @@ and progress photos.
 
 ## Getting it
 
-Every merge to `main` publishes a fresh build to the [`latest`
-release](https://github.com/Telrath-CG/sablewright/releases/tag/latest), so
-that tag is always the current build of `main`:
+The [latest
+release](https://github.com/Telrath-CG/sablewright/releases/latest) is the one
+to take. Every version carries the same set of downloads:
 
 | Platform | Download |
 | --- | --- |
@@ -20,6 +20,12 @@ that tag is always the current build of `main`:
 | Fedora, RHEL, openSUSE | `sablewright-<version>-1.x86_64.rpm` |
 | Arch | `sablewright-<version>-1-x86_64.pkg.tar.zst` |
 | Other Linux | `Sablewright-Linux`, a bare binary |
+
+Every merge to `main` also refreshes the [`latest`
+prerelease](https://github.com/Telrath-CG/sablewright/releases/tag/latest) with
+a build of whatever is on `main` right now. It holds the same set of downloads
+and is replaced wholesale by the next merge, so take it only to try something
+that hasn't been released yet.
 
 **macOS** supports Apple Silicon (M1 and later) and nothing else. No Intel
 build is produced, and the one inside the disk image will not run on an Intel
