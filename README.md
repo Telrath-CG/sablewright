@@ -332,15 +332,5 @@ Sablewright is licensed under the GNU General Public License version 3 — see
 [LICENSE](LICENSE) for the full text. It is free to use, study, modify and
 redistribute; a derivative has to ship its own source under the same terms.
 
-The released binaries carry third-party work under its own terms. The built-in
-paint library takes its hex swatch values from `miniature-paints`, which is
-MIT, and the binary statically links Wails and seventeen other Go modules
-under MIT, BSD 2-Clause, BSD 3-Clause and Apache 2.0. Every one of those
-notices is reproduced in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md),
-which the Linux packages install to `/usr/share/doc/sablewright/`.
-
-All of them are compatible with GPL-3.0. Apache 2.0 is the one that would not
-have been under GPL-2.0, which is a reason not to go backwards.
-
 Paint, range and game names are the trademarks of their respective owners.
 Sablewright is not affiliated with, endorsed by, or sponsored by any of them.
