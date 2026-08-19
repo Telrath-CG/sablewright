@@ -44,9 +44,9 @@ fits — they install to `/usr/bin` and add a menu entry, rather than leaving a
 file to keep track of:
 
 ```
-sudo apt install ./sablewright_1.2.0_amd64.deb
-sudo dnf install ./sablewright-1.2.0-1.x86_64.rpm
-sudo pacman -U sablewright-1.2.0-1-x86_64.pkg.tar.zst
+sudo apt install ./sablewright_1.2.1_amd64.deb
+sudo dnf install ./sablewright-1.2.1-1.x86_64.rpm
+sudo pacman -U sablewright-1.2.1-1-x86_64.pkg.tar.zst
 ```
 
 All three depend on GTK 3 and WebKit2GTK 4.1, which current distributions ship
@@ -301,7 +301,7 @@ three formats, with no root and no containers involved:
 
 ```
 go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
-export VERSION=1.2.0
+export VERSION=1.2.1
 nfpm pkg -f build/linux/nfpm.yaml --packager deb       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager rpm       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager archlinux --target build/bin/
@@ -322,7 +322,7 @@ scripts read the same field and hand it to the linker along with the short
 commit hash:
 
 ```
--ldflags "-w -s -X main.version=1.2.0 -X main.commit=73ec59c"
+-ldflags "-w -s -X main.version=1.2.1 -X main.commit=73ec59c"
 ```
 
 The sidebar shows whatever was stamped in, which is why it reports the commit
