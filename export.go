@@ -7,10 +7,12 @@ package main
 // the thing you show someone - the photos, the paints, and the log of how it
 // came together - in a file that outlives the app.
 //
-// Two formats, chosen by the extension in the save dialog. HTML is one
+// Two formats, chosen in the app before the save dialog opens. HTML is one
 // self-contained file with the photos embedded in it, which opens in any
-// browser and prints to PDF; Markdown is text for a forum or a club post,
-// with the photos copied into a folder beside it.
+// browser and prints to PDF from there; Markdown is text for a forum or a
+// club post, with the photos copied into a folder beside it. There is no
+// PDF of our own: the page already prints to one, and a second renderer
+// would mean a second layout to keep in step with this one.
 
 import (
 	"encoding/base64"
@@ -32,33 +34,57 @@ const exportPhotoMax = 1200
 
 // ExportMini writes one mini out as a shareable file and returns the path.
 // An empty path with no error means the save dialog was cancelled.
-func (a *App) ExportMini(id int) (string, error) {
+//
+// The format is asked for in the app rather than read back off the saved
+// name. A save dialog hands back a path and nothing else - which of its file
+// types was chosen is not in it - so a format inferred from the extension is
+// really a guess at what the dialog did with a name the user never retyped,
+// and the guess landed on HTML every time. Anything other than "md" is the
+// page, which is what the export is for.
+func (a *App) ExportMini(id int, format string) (string, error) {
 	m, ok := a.store.ModelByID(id)
 	if !ok {
 		return "", fmt.Errorf("that mini no longer exists")
 	}
+
+	markdown := strings.EqualFold(strings.TrimSpace(format), "md")
+	ext, filter := ".html", wruntime.FileFilter{
+		DisplayName: "Web page, photos included (*.html)", Pattern: "*.html"}
+	if markdown {
+		ext, filter = ".md", wruntime.FileFilter{
+			DisplayName: "Markdown, photos alongside (*.md)", Pattern: "*.md"}
+	}
+	// One filter, the chosen one: a list to pick from would offer a second
+	// choice that no longer decides anything.
 	path, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
 		Title:           "Export " + m.Name,
-		DefaultFilename: safeFilename(m.Name) + ".html",
-		Filters: []wruntime.FileFilter{
-			{DisplayName: "Web page, photos included (*.html)", Pattern: "*.html"},
-			{DisplayName: "Markdown, photos alongside (*.md)", Pattern: "*.md"},
-		},
+		DefaultFilename: safeFilename(m.Name) + ext,
+		Filters:         []wruntime.FileFilter{filter},
 	})
 	if err != nil || path == "" {
 		return "", err
 	}
+	path = withExtension(path, ext)
 
 	paints := a.paintNames(m.PaintIDs)
-	if strings.EqualFold(filepath.Ext(path), ".md") {
+	if markdown {
 		return path, a.exportMarkdown(m, paints, path)
 	}
-	// Anything else gets the web page: a picker that returns no extension,
-	// or a typed name that lost one, should not fail the export outright.
-	if filepath.Ext(path) == "" {
-		path += ".html"
-	}
 	return path, a.exportHTML(m, paints, path)
+}
+
+// withExtension makes the name match what is about to be written into it. A
+// name typed with no extension, or with the one the other format uses, would
+// otherwise leave a file whose contents and label disagree. Extensions that
+// already mean the chosen format are left as they were typed.
+func withExtension(path, ext string) string {
+	switch have := strings.ToLower(filepath.Ext(path)); {
+	case have == ext,
+		ext == ".html" && have == ".htm",
+		ext == ".md" && have == ".markdown":
+		return path
+	}
+	return path + ext
 }
 
 // paintNames resolves paint ids to name, brand and colour for the export.

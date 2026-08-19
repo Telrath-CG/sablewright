@@ -643,6 +643,8 @@ select:focus { border-color: var(--accent); }
   background: var(--bg); border-radius: 12px; box-shadow: var(--shadow);
   width: min(760px, 92vw); max-height: 88vh; display: flex; flex-direction: column;
 }
+/* a dialog that asks one question, at the width of the question */
+.modal.slim { width: min(460px, 92vw); }
 .modal header {
   display: flex; align-items: center; padding: 16px 20px 12px;
 }
@@ -684,6 +686,25 @@ select:focus { border-color: var(--accent); }
 
 .check { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 14px; }
 .check input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+/* One of a few, each given room to say what it does rather than sitting as a
+   word beside a radio. The whole card is the label, so the sentence is part
+   of what you click. */
+.choices { display: grid; gap: 10px; padding-bottom: 4px; }
+.choice {
+  display: flex; align-items: flex-start; gap: 11px; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 8px;
+  padding: 12px 14px; background: var(--input-bg);
+}
+.choice:hover { border-color: var(--border-strong); }
+/* the checked card is marked out where :has() runs; where it doesn't, the
+   radio still says which one it is */
+.choice:has(input:checked) { border-color: var(--accent); background: var(--sel); }
+.choice input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--accent); cursor: pointer; }
+.choice b { font-size: 14px; }
+.choice small {
+  display: block; color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 3px;
+}
 
 /* the paints picker reuses the screens' filter bar, but a modal is narrower
    than a page - let the search box take whatever the brand select leaves */

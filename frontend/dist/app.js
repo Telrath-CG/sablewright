@@ -774,13 +774,10 @@ async function renderModelDetail(id) {
     </div>`;
 
   $("#edit").onclick = () => modelDialog(m);
-  // The save dialog decides the format: an .html file carries its photos
-  // inside it, an .md file writes them into a folder alongside. Cancelling
-  // comes back with no path and should say nothing at all.
-  $("#export").onclick = async () => {
-    const path = await call(App().ExportMini, m.id);
-    if (path) toast("Exported");
-  };
+  // The format is picked first, then the file: a page carries its photos
+  // inside it, a note writes them into a folder alongside. Cancelling either
+  // dialog comes back with no path and should say nothing at all.
+  $("#export").onclick = () => exportDialog(m);
   // no redraw here: startTimer -> drawTimer -> syncDetailTimer does it
   const startBtn = $("#start-timer");
   if (startBtn) startBtn.onclick = () => startTimer(m.id, m.name);
@@ -1296,11 +1293,14 @@ function paintChips(ids, byId) {
 }
 
 /* =================================================================== MODALS */
-function openModal(html) {
+// cls narrows the dialog for the ones that ask a single question; the width
+// belongs to the box rather than its contents, so it is set here.
+function openModal(html, cls = "") {
   const modal = $("#modal");
   // A modal re-renders in place - a tab switch, or the paint picker filtering
   // as you type - so the caret needs the same treatment the screens get.
   const snap = captureFocus(modal);
+  modal.className = cls ? `modal ${cls}` : "modal";
   modal.innerHTML = html;
   $("#modal-backdrop").hidden = false;
   restoreFocus(snap);
@@ -1318,6 +1318,47 @@ function closeModal() {
   syncDetailTimer();
 }
 function escClose(e) { if (e.key === "Escape") closeModal(); }
+
+/* ---- export ---- */
+// The format is asked here rather than left to the save dialog's file-type
+// list, which decides nothing the backend can read and so left every export a
+// web page. Each option says what the file is for, since that is the choice
+// being made. PDF is not a third option: it is what the page prints to, which
+// is why the page says so.
+function exportDialog(m) {
+  const choice = (value, checked, name, blurb) => `
+    <label class="choice">
+      <input type="radio" name="ex-fmt" value="${value}"${checked ? " checked" : ""}>
+      <span><b>${name}</b><small>${blurb}</small></span>
+    </label>`;
+
+  openModal(`
+    <header><h2>Export ${esc(m.name)}</h2><button class="close">✕</button></header>
+    <div class="mbody">
+      <div class="choices">
+        ${choice("html", true, "Web page (.html)",
+          "One file with the photos inside it. Opens in any browser, and prints to PDF from there.")}
+        ${choice("md", false, "Markdown note (.md)",
+          "Text for a forum or club post, with the photos copied into a folder beside it.")}
+      </div>
+    </div>
+    <footer>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="ex-cancel">Cancel</button>
+      <button class="btn" id="ex-go">Choose file…</button>
+    </footer>`, "slim");
+
+  $("input[name=ex-fmt]:checked").focus();
+  $("#ex-cancel").onclick = closeModal;
+  $("#ex-go").onclick = async () => {
+    const format = $("input[name=ex-fmt]:checked").value;
+    // Out of the way before the save dialog opens: that is the next thing to
+    // look at, and this one has nothing left to say.
+    closeModal();
+    const path = await call(App().ExportMini, m.id, format);
+    if (path) toast("Exported");
+  };
+}
 
 /* ---- mini ---- */
 // opts lets a caller open straight onto a tab with the log form part-filled -

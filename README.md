@@ -128,12 +128,18 @@ across a squad of ten is eighteen minutes a mini, and that's the figure that
 tells you whether the next squad is an evening or a fortnight. Everything here
 is worked out from sessions you've already logged; nothing extra is recorded.
 
-**Export** — *Export* on a mini writes it out as a file to show someone: an
-`.html` page with the photos embedded, which opens in any browser and prints
-to PDF, or an `.md` note for a forum or club post with the photos copied into
-a folder beside it. The save dialog's file type decides which. This is not a
-backup — it's the finished article, its paints, and the log of how it got
-there.
+**Export** — *Export* on a mini writes it out as a file to show someone, in
+one of two formats picked before the save dialog opens:
+
+- **Web page** — a single `.html` file with the photos embedded in it. It
+  opens in any browser, and a **PDF** is that page printed from there
+  (Ctrl/Cmd-P → *Save as PDF*); the page carries a print layout for it. There
+  is no separate PDF export.
+- **Markdown note** — an `.md` file for a forum or club post, with the photos
+  copied into a folder beside it.
+
+This is not a backup — it's the finished article, its paints, and the log of
+how it got there.
 
 **Technique Notes** — recipes and methods, searchable by title, body or tag.
 A note can carry the paints it calls for, picked from the rack the same way a

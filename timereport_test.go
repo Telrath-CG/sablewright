@@ -168,6 +168,28 @@ func TestExportMarkdownCopiesThePhotosBeside(t *testing.T) {
 	}
 }
 
+// The format is chosen in the app, so the name the save dialog comes back
+// with has to be made to match it: the file is handed to someone else, and
+// one labelled .md with a web page inside is worse than either format.
+func TestExportNamesTheFileForItsFormat(t *testing.T) {
+	cases := []struct{ path, ext, want string }{
+		{"hero", ".html", "hero.html"},
+		{"hero.html", ".html", "hero.html"},
+		{"hero.HTML", ".html", "hero.HTML"}, // already a page; leave the name typed
+		{"hero.htm", ".html", "hero.htm"},
+		{"hero", ".md", "hero.md"},
+		{"hero.md", ".md", "hero.md"},
+		{"hero.markdown", ".md", "hero.markdown"},
+		{"hero.html", ".md", "hero.html.md"}, // the other format's name means nothing here
+		{"Sgt. Weathers", ".md", "Sgt. Weathers.md"},
+	}
+	for _, c := range cases {
+		if got := withExtension(c.path, c.ext); got != c.want {
+			t.Errorf("withExtension(%q, %q) = %q, want %q", c.path, c.ext, got, c.want)
+		}
+	}
+}
+
 // writePhoto puts a real, decodable image in the store's photo folder. The
 // HTML exporter re-encodes what it embeds, so a file of made-up bytes would
 // be silently dropped and the test would pass for the wrong reason.
