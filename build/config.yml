@@ -9,7 +9,7 @@
 info:
   companyName: "Sablewright"
   productName: "Sablewright"
-  productIdentifier: "net.dynamicsyntax.sablewright"
+  productIdentifier: "io.github.telrath-cg.sablewright"
   description: "Track your miniature painting projects"
   copyright: ""
   comments: "Track your miniature painting projects: progress, paints used and technique notes."

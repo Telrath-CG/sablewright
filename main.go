@@ -69,7 +69,7 @@ func (h photoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // appID names Sablewright to the operating system: the single-instance lock,
 // the GTK application on Linux, and the bundle identifier in build/config.yml.
-const appID = "net.dynamicsyntax.sablewright"
+const appID = "io.github.telrath-cg.sablewright"
 
 // photoRoutes sends /photos/ to the photo handler and everything else on to
 // the app's own files. Wails v3 has no fallback handler for paths its assets
