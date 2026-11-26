@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,6 +100,12 @@ func TestSnapshotOnStartupKeepsThreeAndDropsTheOldest(t *testing.T) {
 
 	base := time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC)
 	for i := 0; i < 5; i++ {
+		// Each launch follows a session that changed something; a launch that
+		// changed nothing makes no copy at all (see the test below).
+		s.data.Models[0].Notes = fmt.Sprintf("session %d", i)
+		if err := s.persist(); err != nil {
+			t.Fatal(err)
+		}
 		if err := s.SnapshotOnStartup(base.Add(time.Duration(i) * time.Hour).
 			Format("20060102-150405")); err != nil {
 			t.Fatalf("SnapshotOnStartup(): %v", err)
@@ -122,5 +129,30 @@ func TestSnapshotOnStartupKeepsThreeAndDropsTheOldest(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(names, " "), "20260808-090000") {
 		t.Errorf("the oldest snapshot survived in %v", names)
+	}
+}
+
+// Opening and closing the app without changing anything must not rotate the
+// distinct copies out. After a collection is lost and replaced by an empty
+// one, every relaunch would otherwise push one more good copy off the end.
+func TestSnapshotOnStartupSkipsACopyOfAnUnchangedCollection(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100, Models: []Model{{ID: 1, Name: "Marine", Count: 1}}}
+	if err := s.persist(); err != nil {
+		t.Fatal(err)
+	}
+	base := time.Date(2026, 8, 8, 9, 0, 0, 0, time.UTC)
+	for i := 0; i < 5; i++ {
+		if err := s.SnapshotOnStartup(base.Add(time.Duration(i) * time.Hour).
+			Format("20060102-150405")); err != nil {
+			t.Fatalf("SnapshotOnStartup(): %v", err)
+		}
+	}
+	made, err := s.rollingSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(made) != 1 || made[0] != "collection-20260808-090000.json" {
+		t.Errorf("five launches of an unchanged collection left %v, want only the first copy", made)
 	}
 }

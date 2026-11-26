@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -281,20 +283,40 @@ func appDir(name, unixName string) string {
 	}
 }
 
-func NewStore() (*Store, error) {
+// NewStore opens the collection in the data folder. The warning is a problem
+// the app survived - a collection file that could not be read and was moved
+// aside - which the UI shows once it is up. The error is one it can't start
+// past.
+func NewStore() (s *Store, warning string, err error) {
 	dir := DataDir()
 	if err := os.MkdirAll(filepath.Join(dir, "photos"), 0o755); err != nil {
-		return nil, fmt.Errorf("could not create the data folder: %w", err)
+		return nil, "", fmt.Errorf("could not create the data folder: %w", err)
 	}
-	s := &Store{dir: dir, path: filepath.Join(dir, "collection.json")}
-	if err := s.load(); err != nil {
-		return nil, err
+	s = &Store{dir: dir, path: filepath.Join(dir, "collection.json")}
+	err = s.load()
+	var aside *setAsideError
+	if errors.As(err, &aside) {
+		return s, aside.Error(), nil
 	}
-	return s, nil
+	if err != nil {
+		return nil, "", err
+	}
+	return s, "", nil
 }
 
 func (s *Store) PhotoDir() string { return filepath.Join(s.dir, "photos") }
 func (s *Store) Dir() string      { return s.dir }
+
+// setAsideError is load's report of a collection file it could not parse and
+// moved out of the way. The store is usable afterwards, holding a fresh
+// collection, so this is a warning to pass on rather than a reason to stop.
+type setAsideError struct{ name string }
+
+func (e *setAsideError) Error() string {
+	return fmt.Sprintf("Your collection file could not be read, so it was set aside as %s "+
+		"in the data folder and a fresh collection was started. "+
+		"Your automatic backups are in the backups folder beside it.", e.name)
+}
 
 func (s *Store) load() error {
 	b, err := os.ReadFile(s.path)
@@ -306,25 +328,44 @@ func (s *Store) load() error {
 	if err != nil {
 		return fmt.Errorf("could not read your collection: %w", err)
 	}
-	if err := json.Unmarshal(b, &s.data); err != nil {
-		// Don't destroy the file we failed to parse - move it aside so the
-		// user still has it, and carry on with an empty collection.
+	d, err := decodeData(b)
+	if err != nil {
+		// Never write over a file that failed to parse: it is the user's whole
+		// collection, and a fix may well be possible by hand. Move it aside and
+		// start fresh - and if it can't be moved, stop rather than replace it.
 		bad := s.path + ".corrupt-" + time.Now().Format("20060102-150405")
-		_ = os.Rename(s.path, bad)
+		if rerr := os.Rename(s.path, bad); rerr != nil {
+			return fmt.Errorf("your collection file could not be read (%v), and could not be "+
+				"moved aside to keep it safe: %w", err, rerr)
+		}
 		s.data = Data{Version: dataVersion, NextID: 1}
 		s.addLibraryPaints()
-		_ = s.persist()
-		return fmt.Errorf("your collection file could not be read and was set aside as %s; starting fresh", filepath.Base(bad))
+		if perr := s.persist(); perr != nil {
+			return perr
+		}
+		return &setAsideError{name: filepath.Base(bad)}
 	}
-	if s.data.NextID < 1 {
-		s.data.NextID = 1
-	}
+	s.data = d
 	if s.data.Version < dataVersion {
 		s.migrate()
 		s.data.Version = dataVersion
 		return s.persist()
 	}
 	return nil
+}
+
+// decodeData parses a collection file into a fresh Data. Fresh matters: an
+// older file lacks keys a newer one has, and decoding into a value that
+// already held a collection would leave those keys at their old contents.
+func decodeData(b []byte) (Data, error) {
+	var d Data
+	if err := json.Unmarshal(b, &d); err != nil {
+		return Data{}, err
+	}
+	if d.NextID < 1 {
+		d.NextID = 1
+	}
+	return d, nil
 }
 
 // rollingBackups is how many automatic copies of the collection are kept.
@@ -353,14 +394,38 @@ func (s *Store) SnapshotOnStartup(stamp string) error {
 	if err := os.MkdirAll(s.BackupDir(), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(
-		filepath.Join(s.BackupDir(), "collection-"+stamp+".json"), raw, 0o644); err != nil {
-		return err
-	}
-
-	entries, err := os.ReadDir(s.BackupDir())
+	made, err := s.rollingSnapshots()
 	if err != nil {
 		return err
+	}
+	// A launch that changed nothing since the last one makes no new copy.
+	// Without this, opening and closing the app a few times rotates every
+	// distinct copy out - which is exactly what happens after a collection
+	// is lost and the app keeps starting on the empty one that replaced it.
+	if n := len(made); n > 0 {
+		if last, err := os.ReadFile(filepath.Join(s.BackupDir(), made[n-1])); err == nil &&
+			bytes.Equal(last, raw) {
+			return nil
+		}
+	}
+	name := "collection-" + stamp + ".json"
+	if err := os.WriteFile(filepath.Join(s.BackupDir(), name), raw, 0o644); err != nil {
+		return err
+	}
+	made = append(made, name)
+	sort.Strings(made)
+	for i := 0; i < len(made)-rollingBackups; i++ {
+		_ = os.Remove(filepath.Join(s.BackupDir(), made[i]))
+	}
+	return nil
+}
+
+// rollingSnapshots lists the automatic copies, oldest first. The names carry
+// a sortable timestamp, so sorting them by name sorts them by age.
+func (s *Store) rollingSnapshots() ([]string, error) {
+	entries, err := os.ReadDir(s.BackupDir())
+	if err != nil {
+		return nil, err
 	}
 	var made []string
 	for _, e := range entries {
@@ -369,12 +434,8 @@ func (s *Store) SnapshotOnStartup(stamp string) error {
 			made = append(made, e.Name())
 		}
 	}
-	// The names carry a sortable timestamp, so the oldest sort first.
 	sort.Strings(made)
-	for i := 0; i < len(made)-rollingBackups; i++ {
-		_ = os.Remove(filepath.Join(s.BackupDir(), made[i]))
-	}
-	return nil
+	return made, nil
 }
 
 // migrate brings a collection saved by an older build up to dataVersion. It

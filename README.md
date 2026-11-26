@@ -188,13 +188,17 @@ opens it. Nothing is uploaded anywhere; the app makes no network connections.
 
 **Back it up** with *Backup data* in the sidebar — one zip containing the
 database and every photo. *Import backup* restores one, which is also how you
-move to a new computer.
+move to a new computer. Importing moves your current collection and photos
+into `backups/before-restore-<date>` first, so importing the wrong file can be
+undone by hand. Only the database and the image files in a backup are read;
+anything else in the zip is ignored.
 
 On top of that the app copies `collection.json` into a `backups` folder every
-time it starts, keeping the last three. That's for the failure you only notice
-afterwards — a bad import, a mass edit, a file that stopped being readable.
-Only the database is copied, since the photos are large and don't change;
-a manual backup is still the one that carries everything.
+time it starts, keeping the last three distinct copies — a launch that changed
+nothing makes no new one. That's for the failure you only notice afterwards — a
+bad import, a mass edit, a file that stopped being readable. Only the database
+is copied, since the photos are large and don't change; a manual backup is
+still the one that carries everything.
 
 **Deleting a mini** puts it in the trash for 30 days rather than destroying
 it, and the toast offers *Undo* on the spot. Notes and a status can be typed
@@ -212,7 +216,9 @@ comfortably fast and brings a real benefit: no cgo, no C compiler, and no native
 database library to build per platform. That's a large part of why the Windows
 build needs nothing but Go. Every save is atomic — written to a temp file and
 renamed — so an interrupted write can't corrupt your collection, and if the file
-is ever unreadable it's moved aside rather than deleted.
+is ever unreadable it's moved aside rather than deleted, and the app says so
+when it opens. If it can't be moved aside, the app stops rather than write over
+it.
 
 ---
 

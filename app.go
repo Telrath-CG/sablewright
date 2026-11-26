@@ -385,8 +385,14 @@ func (a *App) SetCoverPhoto(modelID, photoID int) (*Model, error) {
 }
 
 // OpenPhoto shows a photo full size in the system's default image viewer.
+// Only image files are handed to the system: the name comes from the page,
+// and the system opener would just as happily run a script.
 func (a *App) OpenPhoto(file string) error {
-	return openPath(filepath.Join(a.store.PhotoDir(), filepath.Base(file)))
+	name := filepath.Base(file)
+	if !isImageFile(name) {
+		return fmt.Errorf("that isn't a photo")
+	}
+	return openPath(filepath.Join(a.store.PhotoDir(), name))
 }
 
 func (a *App) OpenDataFolder() error { return openPath(a.store.Dir()) }
@@ -465,7 +471,8 @@ func (a *App) Restore() (bool, error) {
 		return false, err
 	}
 	ok, err := a.Confirm("Import backup",
-		"This replaces everything currently in the app with the contents of that backup.\n\nContinue?",
+		"This replaces everything currently in the app with the contents of that backup.\n\n"+
+			"Your current collection and photos are moved to the backups folder first.\n\nContinue?",
 		"Import")
 	if err != nil {
 		return false, err
@@ -473,57 +480,7 @@ func (a *App) Restore() (bool, error) {
 	if !ok {
 		return false, nil
 	}
-
-	zr, err := zip.OpenReader(src)
-	if err != nil {
-		return false, fmt.Errorf("could not open that zip: %w", err)
-	}
-	defer zr.Close()
-	hasData := false
-	for _, f := range zr.File {
-		if f.Name == "collection.json" {
-			hasData = true
-		}
-	}
-	if !hasData {
-		return false, fmt.Errorf("that zip doesn't look like a Sablewright backup")
-	}
-
-	a.store.mu.Lock()
-	defer a.store.mu.Unlock()
-	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
-			continue
-		}
-		// guard against zip-slip: never write outside the data folder
-		name := filepath.Clean(filepath.FromSlash(f.Name))
-		if strings.HasPrefix(name, "..") || filepath.IsAbs(name) {
-			continue
-		}
-		dst := filepath.Join(a.store.dir, name)
-		if !strings.HasPrefix(dst, filepath.Clean(a.store.dir)+string(os.PathSeparator)) {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return false, err
-		}
-		rc, err := f.Open()
-		if err != nil {
-			return false, err
-		}
-		out, err := os.Create(dst)
-		if err != nil {
-			rc.Close()
-			return false, err
-		}
-		_, cErr := io.Copy(out, rc)
-		rc.Close()
-		out.Close()
-		if cErr != nil {
-			return false, cErr
-		}
-	}
-	if err := a.store.load(); err != nil {
+	if err := a.store.RestoreFrom(src, time.Now().Format("20060102-150405")); err != nil {
 		return false, err
 	}
 	return true, nil
