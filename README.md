@@ -24,6 +24,10 @@ to take. Every version carries the same set of downloads:
 | Arch | `sablewright-<version>-1-x86_64.pkg.tar.zst` |
 | Other Linux | `Sablewright-Linux`, a bare binary |
 
+**Windows** — the bare `.exe` runs on Microsoft's WebView2, which Windows 11
+always has and most Windows 10 PCs have picked up through updates. The
+installer adds WebView2 if it's missing, so take that one if you're unsure.
+
 Every merge to `main` also refreshes the [`latest`
 prerelease](https://github.com/Telrath-CG/sablewright/releases/tag/latest) with
 a build of whatever is on `main` right now. It holds the same set of downloads
@@ -49,8 +53,10 @@ sudo dnf install ./sablewright-1.2.1-1.x86_64.rpm
 sudo pacman -U sablewright-1.2.1-1-x86_64.pkg.tar.zst
 ```
 
-All three depend on GTK 3 and WebKit2GTK 4.1, which current distributions ship
-as standard, and the package manager will say so plainly if either is absent.
+All three depend on GTK 4 and WebKitGTK 6.0, which Ubuntu 24.04, Debian 13 and
+newer releases ship as standard, and the package manager will say so plainly
+if either is absent. Older releases such as Ubuntu 22.04 and Debian 12 don't
+have them; stay on Sablewright 1.2.x there.
 
 The bare binary is the fallback for distributions none of those cover, and for
 running the app without installing it. It declares no dependencies, so a
@@ -232,16 +238,20 @@ it.
 
 ### Prerequisites
 
-Every platform needs [Go 1.26 or newer](https://go.dev/dl/) and the Wails CLI:
+Every platform needs [Go 1.26 or newer](https://go.dev/dl/). Distribution
+packages of Go are often older than that, so take it from go.dev if yours is.
+
+The app is built with plain `go build`. The [Wails](https://v3.wails.io) CLI is
+only a tool here — for the Windows resources and installer, and the macOS disk
+image — and is pinned to the same version as the library:
 
 ```
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
 ```
 
-**There is no Node toolchain to install.** Wails projects normally want npm,
-but this frontend is plain HTML, CSS and JavaScript committed under
-`frontend/dist`, so the frontend build hooks in `wails.json` are empty and
-there is nothing to install or bundle.
+**There is no Node toolchain to install.** The frontend is plain HTML, CSS and
+JavaScript committed under `frontend/dist`, so there is nothing to install or
+bundle.
 
 Past that, each platform needs its own native pieces.
 
@@ -258,25 +268,18 @@ xcode-select --install
 brew install go
 ```
 
-**Linux** — GTK 3 and WebKit2GTK development headers, plus a C compiler. On
-Debian and Ubuntu:
+**Linux** — GTK 4 and WebKitGTK 6.0 development headers, plus a C compiler.
+These first shipped in Ubuntu 24.04 and Debian 13; older releases can't build
+or run Sablewright 2. On Debian and Ubuntu:
 
 ```
-sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+sudo apt install build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
 ```
 
-WebKit2GTK comes in a 4.0 and a 4.1 flavor and they are not interchangeable:
-building against 4.1 needs `-tags webkit2_41`. Releases target 4.1, because
-4.0 is gone from Ubuntu 24.04, Debian 13 and Arch, and a package built against
-it would be uninstallable on most current systems.
-`build-mac-or-linux.sh` detects which of the two you have and picks the tag to
-match. CI still runs on `ubuntu-22.04` — for its older glibc, which is what
-lets one binary run on old distributions as well as new — but installs the 4.1
-headers there rather than the 4.0 that image defaults to.
+On Fedora: `sudo dnf install gtk4-devel webkitgtk6.0-devel`.
 
-**Windows** — nothing beyond Go. The WebView2 runtime ships with Windows 11 and
-is embedded into the binary at build time regardless. Building the *installer*
-additionally needs [NSIS](https://nsis.sourceforge.io) on `PATH`:
+**Windows** — Go and the Wails CLI; no C compiler. Building the *installer*
+also needs [NSIS](https://nsis.sourceforge.io) on `PATH`:
 
 ```
 winget install NSIS.NSIS
@@ -284,65 +287,82 @@ winget install NSIS.NSIS
 
 ### Building
 
-```
-wails dev        # run with live reload
-wails build      # binary into build/bin
-```
+The scripts do everything below for you: `build-mac-or-linux.sh` on macOS and
+Linux, `Build Windows app.bat` on Windows. They run the same steps as the
+release build in `.github/workflows/build.yml`.
 
-The Windows installer is a separate invocation:
-
-```
-wails build -platform windows/amd64 -webview2 embed -nsis
-```
-
-The macOS release is an Apple Silicon build wrapped in a disk image. Wails v2
-has no packaging target for that, so CI hands the finished bundle to
-[create-dmg](https://github.com/create-dmg/create-dmg):
+The app itself, on any platform:
 
 ```
-brew install create-dmg
-wails build -platform darwin/arm64 -ldflags "-w -s"
+go build -tags production -trimpath -o build/bin/Sablewright .
 ```
 
-`build-mac-or-linux.sh` runs the same build and produces the `.dmg` alongside
-the `.app` whenever create-dmg is installed, and just the `.app` when it isn't.
+`go run .` runs it straight from the source for a quick look; there is no live
+reload, so restart it after a change.
 
-The Linux packages come from [nfpm](https://github.com/goreleaser/nfpm), which
-wraps the finished binary — one config in `build/linux/nfpm.yaml` covering all
-three formats, with no root and no containers involved:
+**Windows** needs its icon, file properties and manifest compiled into the
+`.exe` first. The manifest matters: it is what lets the confirm dialogs show
+their own button labels rather than a fixed Yes and No.
+
+```
+wails3 generate syso -arch amd64 -icon build/windows/icon.ico -manifest build/windows/wails.exe.manifest -info build/windows/info.json -out wails_windows_amd64.syso
+go build -tags production -trimpath -ldflags "-H windowsgui" -o build/bin/Sablewright.exe .
+```
+
+The installer bundles Microsoft's WebView2 bootstrapper, so it also works on a
+PC without the WebView2 runtime; the bare `.exe` needs the runtime already
+there, which Windows 11 always has:
+
+```
+wails3 generate webview2bootstrapper -dir build/windows/nsis
+makensis -DARG_WAILS_AMD64_BINARY=%CD%\build\bin\Sablewright.exe build\windows\nsis\project.nsi
+```
+
+**macOS** releases are an Apple Silicon `.app` in a disk image. The bundle is
+put together from `build/darwin` — the binary, `Info.plist` and the icon — and
+ad-hoc signed; `build-mac-or-linux.sh` shows the steps. The disk image is then:
+
+```
+wails3 tool package --format dmg --name Sablewright --out build/bin
+```
+
+The **Linux** packages come from [nfpm](https://github.com/goreleaser/nfpm),
+which wraps the finished binary — one config in `build/linux/nfpm.yaml`
+covering all three formats, with no root and no containers involved:
 
 ```
 go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
-export VERSION=1.2.1
+export VERSION=2.0.0
 nfpm pkg -f build/linux/nfpm.yaml --packager deb       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager rpm       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager archlinux --target build/bin/
 ```
 
-The dependency lists differ per format in ways worth knowing about. The `.deb`
-spells out `libgtk-3-0 | libgtk-3-0t64`, because Ubuntu 24.04's 64-bit `time_t`
-transition renamed that package. The `.rpm` requires sonames rather than
-package names, since Fedora and openSUSE disagree on what to call WebKit while
-providing the same soname. Only the `.deb` and `.rpm` carry a glibc floor;
-Arch is rolling, so its glibc is never older than the build's.
+The `.rpm` requires sonames rather than package names, since the RPM
+distributions disagree on what to call WebKit while providing the same
+soname. Only the `.deb` and `.rpm` carry a glibc floor (2.39, from the Ubuntu
+24.04 build); Arch is rolling, so its glibc is never older than the build's.
+CI installs the `.deb` on Ubuntu 24.04 after building it, so a dependency
+named wrong fails the build rather than someone's install.
 
 ### Version numbers
 
-`productVersion` in `wails.json` is the only place the version is written
-down. Wails already reads it there for the Windows file properties; the build
-scripts read the same field and hand it to the linker along with the short
-commit hash:
+`info.version` in `build/config.yml` is the only place the version is written
+down. CI and the build scripts read it there, hand it to the linker along with
+the short commit hash, and stamp it into the macOS `Info.plist`, the Windows
+file properties and installer, and the Linux packages:
 
 ```
--ldflags "-w -s -X main.version=1.2.1 -X main.commit=73ec59c"
+-ldflags "-w -s -X main.version=2.0.0 -X main.commit=73ec59c"
 ```
 
 The sidebar shows whatever was stamped in, which is why it reports the commit
 as well as the number: every merge to `main` replaces the same rolling
 release, so two downloads a week apart both call themselves the same version
 and only the hash says which one a bug report is about. A build with nothing
-stamped in says `dev` — that's `wails dev` and a plain `go build`. Releasing a
-new version means editing `wails.json` and nothing else.
+stamped in says `dev` — that's `go run .` and a plain `go build`. Releasing a
+new version means editing `build/config.yml` and nothing else; a pushed tag
+that doesn't match it fails the build.
 
 ## License
 
