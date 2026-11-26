@@ -456,3 +456,43 @@ func TestAllPaintsSortsByNameIgnoringCase(t *testing.T) {
 		}
 	}
 }
+
+// A deleted paint must not leave its id behind anywhere: a recipe calling for
+// it, or a trashed mini that Undo would bring back still pointing at it.
+func TestDeletePaintUnlinksItEverywhere(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100,
+		Paints: []Paint{{ID: 1, Name: "Abaddon Black"}, {ID: 2, Name: "Mephiston Red"}},
+		Models: []Model{{ID: 10, Name: "Marine", Count: 1, PaintIDs: []int{1, 2}}},
+		Tips:   []Tip{{ID: 20, Title: "Black armour", PaintIDs: []int{2, 1}}},
+		Trash:  []Trashed{{Model: Model{ID: 11, Name: "Scout", Count: 1, PaintIDs: []int{1}}, Deleted: "2026-08-01"}},
+	}
+
+	if err := s.DeletePaint(1); err != nil {
+		t.Fatalf("DeletePaint(): %v", err)
+	}
+
+	if ids := s.data.Models[0].PaintIDs; len(ids) != 1 || ids[0] != 2 {
+		t.Errorf("mini paints = %v, want [2]", ids)
+	}
+	if ids := s.data.Tips[0].PaintIDs; len(ids) != 1 || ids[0] != 2 {
+		t.Errorf("recipe paints = %v, want [2]", ids)
+	}
+	if ids := s.data.Trash[0].Model.PaintIDs; len(ids) != 0 {
+		t.Errorf("trashed mini paints = %v, want none", ids)
+	}
+}
+
+// Usage counts minis, not mentions: a paint listed twice on one mini is still
+// used on one mini.
+func TestPaintUsageCountsMinisNotMentions(t *testing.T) {
+	s := &Store{data: Data{Models: []Model{
+		{ID: 1, PaintIDs: []int{5, 5, 6}},
+		{ID: 2, PaintIDs: []int{5}},
+		{ID: 3},
+	}}}
+	got := s.PaintUsageCounts()
+	if got[5] != 2 || got[6] != 1 || got[7] != 0 {
+		t.Errorf("counts = %v, want 5 on 2 minis and 6 on 1", got)
+	}
+}

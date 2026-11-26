@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func projectNames(ps []Project) []string {
 	out := make([]string, len(ps))
@@ -148,5 +151,52 @@ func TestSaveProjectDropsAnEmptyRecord(t *testing.T) {
 
 	if len(s.data.Projects) != 0 {
 		t.Errorf("stored %+v, want the emptied record dropped", s.data.Projects)
+	}
+}
+
+// Renaming onto a project that already exists folds the two together. Its
+// details have to merge into the one row: two rows under a name means only
+// one of them is ever read, and the other's notes are lost without a word.
+func TestRenameProjectOntoAnExistingProjectMergesItsDetails(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100,
+		Projects: []ProjectMeta{
+			{Name: "Cadia Push", Due: "2026-08-15", Notes: "Paint the tanks first."},
+			{Name: "Cadian Push", Notes: "Basing kit is in the drawer."},
+		},
+		Models: []Model{
+			{ID: 1, Name: "A", Project: "Cadia Push", Status: "Backlog", Count: 1},
+			{ID: 2, Name: "B", Project: "Cadian Push", Status: "Backlog", Count: 1},
+		}}
+
+	if _, err := s.RenameProject("Cadia Push", "Cadian Push"); err != nil {
+		t.Fatalf("RenameProject(): %v", err)
+	}
+
+	if len(s.data.Projects) != 1 {
+		t.Fatalf("stored %+v, want one merged record", s.data.Projects)
+	}
+	got := s.data.Projects[0]
+	if got.Name != "Cadian Push" {
+		t.Errorf("name = %q, want the project renamed onto", got.Name)
+	}
+	if got.Due != "2026-08-15" {
+		t.Errorf("due = %q, want the deadline carried over from the renamed project", got.Due)
+	}
+	if !strings.Contains(got.Notes, "Basing kit") || !strings.Contains(got.Notes, "tanks first") {
+		t.Errorf("notes = %q, want both projects' notes kept", got.Notes)
+	}
+}
+
+// The project being renamed onto keeps its own deadline.
+func TestMergeProjectMetaKeepsTheTargetsDeadline(t *testing.T) {
+	got := mergeProjectMeta(
+		ProjectMeta{Name: "Kept", Due: "2026-09-01", Notes: "same"},
+		ProjectMeta{Name: "Gone", Due: "2026-08-01", Notes: "same"})
+	if got.Due != "2026-09-01" {
+		t.Errorf("due = %q, want the target's own 2026-09-01", got.Due)
+	}
+	if got.Notes != "same" {
+		t.Errorf("notes = %q, want identical notes kept once", got.Notes)
 	}
 }

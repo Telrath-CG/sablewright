@@ -1110,18 +1110,52 @@ func (s *Store) RenameProject(from, to string) (int, error) {
 			moved++
 		}
 	}
-	kept := s.data.Projects[:0]
+	var src *ProjectMeta
+	kept := make([]ProjectMeta, 0, len(s.data.Projects))
 	for _, md := range s.data.Projects {
-		switch {
-		case md.Name != from:
-			kept = append(kept, md)
-		case to != "":
-			md.Name = to
-			kept = append(kept, md)
+		if md.Name == from {
+			md := md
+			src = &md
+			continue
+		}
+		kept = append(kept, md)
+	}
+	if src != nil && to != "" {
+		// Renaming onto a project that already exists folds the two together,
+		// so its deadline and notes have to merge rather than sit in a second
+		// row under the same name, where only one of them would ever be read.
+		merged := false
+		for i := range kept {
+			if kept[i].Name == to {
+				kept[i] = mergeProjectMeta(kept[i], *src)
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			src.Name = to
+			kept = append(kept, *src)
 		}
 	}
 	s.data.Projects = kept
 	return moved, s.persist()
+}
+
+// mergeProjectMeta folds one project's details into another's. The project
+// being kept wins on the deadline, since it is the one being renamed onto;
+// notes are never thrown away, so both survive when they differ.
+func mergeProjectMeta(into, from ProjectMeta) ProjectMeta {
+	if strings.TrimSpace(into.Due) == "" {
+		into.Due = from.Due
+	}
+	a, b := strings.TrimSpace(into.Notes), strings.TrimSpace(from.Notes)
+	switch {
+	case a == "":
+		into.Notes = from.Notes
+	case b != "" && a != b:
+		into.Notes = into.Notes + "\n\n" + from.Notes
+	}
+	return into
 }
 
 // ---------------------------------------------------------------------------
@@ -1177,7 +1211,10 @@ func (s *Store) TimeReport(now time.Time) TimeReport {
 	// a year even where the year has holes in it.
 	rep := TimeReport{Months: []TimeBucket{}, Busiest: []MiniTime{}}
 	index := map[string]int{}
-	first := now.AddDate(0, -11, 0)
+	// Counted from the 1st: AddDate normalises an overflowing day, so stepping
+	// months from the 31st lands on 3 March instead of February and the axis
+	// skips months while repeating others.
+	first := time.Date(now.Year(), now.Month()-11, 1, 0, 0, 0, 0, now.Location())
 	for i := 0; i < 12; i++ {
 		m := first.AddDate(0, i, 0)
 		index[m.Format("2006-01")] = i
@@ -1472,30 +1509,48 @@ func (s *Store) DeletePaint(id int) error {
 			break
 		}
 	}
-	// also unlink it from every mini, so nothing dangles
+	// Unlink it everywhere it is named, so nothing dangles: the minis, the
+	// recipes, and the minis in the trash, which can come back with Undo.
 	for i := range s.data.Models {
-		kept := s.data.Models[i].PaintIDs[:0]
-		for _, pid := range s.data.Models[i].PaintIDs {
-			if pid != id {
-				kept = append(kept, pid)
-			}
-		}
-		s.data.Models[i].PaintIDs = kept
+		s.data.Models[i].PaintIDs = withoutID(s.data.Models[i].PaintIDs, id)
+	}
+	for i := range s.data.Tips {
+		s.data.Tips[i].PaintIDs = withoutID(s.data.Tips[i].PaintIDs, id)
+	}
+	for i := range s.data.Trash {
+		s.data.Trash[i].Model.PaintIDs = withoutID(s.data.Trash[i].Model.PaintIDs, id)
 	}
 	return s.persist()
 }
 
-func (s *Store) PaintUsage(id int) int {
-	n := 0
+// withoutID drops every occurrence of id from a list of ids, in place.
+func withoutID(ids []int, id int) []int {
+	kept := ids[:0]
+	for _, x := range ids {
+		if x != id {
+			kept = append(kept, x)
+		}
+	}
+	return kept
+}
+
+// PaintUsageCounts is how many minis each paint is recorded on, keyed by paint
+// id. It is one pass over the collection rather than one per paint, which
+// matters when a table lists the whole rack of well over a thousand paints.
+func (s *Store) PaintUsageCounts() map[int]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := map[int]int{}
 	for _, m := range s.data.Models {
+		seen := map[int]bool{}
 		for _, pid := range m.PaintIDs {
-			if pid == id {
-				n++
-				break
+			if !seen[pid] {
+				seen[pid] = true
+				counts[pid]++
 			}
 		}
 	}
-	return n
+	return counts
 }
 
 // UsesPaint reports whether a list of paint ids contains one.

@@ -107,8 +107,9 @@ func (a *App) ListPaints(f PaintFilter) PaintPage {
 	if f.Limit > 0 && len(ps) > f.Limit {
 		ps = ps[:f.Limit]
 	}
+	used := a.store.PaintUsageCounts()
 	for _, p := range ps {
-		page.Rows = append(page.Rows, PaintRow{Paint: p, UsedOn: a.store.PaintUsage(p.ID)})
+		page.Rows = append(page.Rows, PaintRow{Paint: p, UsedOn: used[p.ID]})
 	}
 	return page
 }
@@ -167,11 +168,12 @@ type WishlistPage struct {
 func (a *App) Wishlist() WishlistPage {
 	listed, missing := a.store.WishlistPaints()
 	page := WishlistPage{Rows: []PaintRow{}, Missing: []PaintRow{}}
+	used := a.store.PaintUsageCounts()
 	for _, p := range listed {
-		page.Rows = append(page.Rows, PaintRow{Paint: p, UsedOn: a.store.PaintUsage(p.ID)})
+		page.Rows = append(page.Rows, PaintRow{Paint: p, UsedOn: used[p.ID]})
 	}
 	for _, p := range missing {
-		page.Missing = append(page.Missing, PaintRow{Paint: p, UsedOn: a.store.PaintUsage(p.ID)})
+		page.Missing = append(page.Missing, PaintRow{Paint: p, UsedOn: used[p.ID]})
 	}
 	return page
 }
