@@ -32,7 +32,7 @@ jobs:
   check:
     name: Check (Linux)
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
 
@@ -42,24 +42,25 @@ jobs:
           go-version: '1.26'
           cache: true
 
+      # Wails v3 builds against GTK 4 and WebKitGTK 6.0, which first shipped
+      # in Ubuntu 24.04 - hence the runner. No build tags: v3 compiles the
+      # real app as it is, so this checks what actually ships.
       - name: Install Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
 
       - name: Download Go dependencies
         run: go mod download
 
-      # The tag has to match the one the build job uses, or this checks a
-      # different WebKit binding than the one that actually ships.
       - name: Build
-        run: go build -tags webkit2_41 ./...
+        run: go build ./...
 
       - name: Vet
-        run: go vet -tags webkit2_41 ./...
+        run: go vet ./...
 
       - name: Test
-        run: go test -tags webkit2_41 ./...
+        run: go test ./...
 
   build:
     name: ${{ matrix.label }}
