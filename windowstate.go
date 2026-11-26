@@ -77,20 +77,28 @@ func grabbable(ws windowState, areas []application.Rect) bool {
 	return false
 }
 
-// fitSize shrinks a saved size to fit the largest of the screens, so a
-// window last sized on a monitor that has since been unplugged can't open
-// with its edges out of reach.
+// fitSize shrinks a saved size to fit the screens there are, so a window
+// last sized on a monitor that has since been unplugged can't open with its
+// edges out of reach. The limit is the space all the screens cover together,
+// so a window spread across two monitors keeps its size, and a little slack
+// covers the invisible borders Windows counts as part of a window.
 func fitSize(ws windowState, areas []application.Rect) (int, int) {
-	maxW, maxH := 0, 0
-	for _, a := range areas {
-		maxW, maxH = max(maxW, a.Width), max(maxH, a.Height)
+	if len(areas) == 0 {
+		return ws.Width, ws.Height
+	}
+	const slack = 32
+	left, top := areas[0].X, areas[0].Y
+	right, bottom := left+areas[0].Width, top+areas[0].Height
+	for _, a := range areas[1:] {
+		left, top = min(left, a.X), min(top, a.Y)
+		right, bottom = max(right, a.X+a.Width), max(bottom, a.Y+a.Height)
 	}
 	w, h := ws.Width, ws.Height
-	if maxW > 0 {
-		w = max(minWidth, min(w, maxW))
+	if w > right-left+slack {
+		w = max(minWidth, right-left)
 	}
-	if maxH > 0 {
-		h = max(minHeight, min(h, maxH))
+	if h > bottom-top+slack {
+		h = max(minHeight, bottom-top)
 	}
 	return w, h
 }
@@ -133,6 +141,8 @@ func rememberWindow(app *application.App, win *application.WebviewWindow, dir st
 			go func() {
 				areas := screenAreas(app)
 				if areas == nil {
+					// Screens never reported: the size, at least, comes back.
+					win.SetSize(saved.Width, saved.Height)
 					return
 				}
 				w, h := fitSize(saved, areas)
@@ -146,6 +156,11 @@ func rememberWindow(app *application.App, win *application.WebviewWindow, dir st
 				if saved.Maximised {
 					win.Maximise()
 				}
+				// What a maximised window goes back to is what was restored,
+				// even if a save ran while the screens were awaited.
+				mu.Lock()
+				last = windowState{X: saved.X, Y: saved.Y, Width: w, Height: h}
+				mu.Unlock()
 			}()
 		})
 	}

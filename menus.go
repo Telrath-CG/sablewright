@@ -143,8 +143,13 @@ func droppablePicture(path string) bool {
 	if !photoExts[strings.ToLower(filepath.Ext(path))] {
 		return false
 	}
+	// Links, folders, pipes, devices and sockets are refused. Other kinds a
+	// file can be - such as a OneDrive file kept online until opened, which
+	// Windows reports as a reparse point rather than a plain file - are
+	// judged by their contents below.
 	info, err := os.Lstat(path)
-	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > maxDroppedPicture {
+	const notAFile = os.ModeDir | os.ModeSymlink | os.ModeNamedPipe | os.ModeSocket | os.ModeDevice | os.ModeCharDevice
+	if err != nil || info.Mode()&notAFile != 0 || info.Size() == 0 || info.Size() > maxDroppedPicture {
 		return false
 	}
 	f, err := os.Open(path)
