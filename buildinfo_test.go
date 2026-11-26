@@ -95,6 +95,15 @@ func TestBuildFilesAgreeWithConfig(t *testing.T) {
 		}
 	}
 
+	// The Windows manifest names the app too, as its assembly identity.
+	manifest := readFile(t, "build", "windows", "wails.exe.manifest")
+	m := regexp.MustCompile(`<assemblyIdentity[^>]*\sname="([^"]*)"`).FindStringSubmatch(manifest)
+	if m == nil {
+		t.Error("wails.exe.manifest has no assemblyIdentity name")
+	} else if m[1] != info["productIdentifier"] {
+		t.Errorf("wails.exe.manifest assemblyIdentity name = %q, want %q", m[1], info["productIdentifier"])
+	}
+
 	var winfo struct {
 		Fixed map[string]string            `json:"fixed"`
 		Info  map[string]map[string]string `json:"info"`
