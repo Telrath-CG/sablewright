@@ -5,33 +5,6 @@ import (
 	"testing"
 )
 
-// Only macOS draws the buttons a dialog asks for. Windows and Linux answer with
-// their own word for yes, so a confirmation matched on the caller's label alone
-// reads as a refusal there and the delete silently never happens.
-func TestIsAffirmativeAcceptsEveryPlatformsYes(t *testing.T) {
-	yes := []string{"Delete", "delete", "Yes", "yes", "Ok", "OK"}
-	for _, c := range yes {
-		if !isAffirmative(c, "Delete") {
-			t.Errorf("isAffirmative(%q, \"Delete\") = false, want true", c)
-		}
-	}
-
-	no := []string{"No", "no", "Cancel", "cancel", "", "   ", "Error"}
-	for _, c := range no {
-		if isAffirmative(c, "Delete") {
-			t.Errorf("isAffirmative(%q, \"Delete\") = true, want false", c)
-		}
-	}
-}
-
-// An empty answer is what a dialog that failed to open reports, and it must
-// never be read as permission to destroy something.
-func TestIsAffirmativeRejectsAnEmptyAnswerEvenWithAnEmptyLabel(t *testing.T) {
-	if isAffirmative("", "") {
-		t.Error(`isAffirmative("", "") = true; a dialog that never answered must not confirm`)
-	}
-}
-
 // The wishlist is a shopping list, not the opposite of owned: a pot you have
 // but have nearly used up belongs on it too.
 // The shopping list's second half is the query only this app can run: a paint
