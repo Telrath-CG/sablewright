@@ -2,7 +2,8 @@ name: Build desktop apps
 
 # Pull requests get the cheap check job; merges to main and pushed v* tags get
 # the full three-platform build. Can also be started by hand from the Actions
-# tab. A tag and a branch are separate refs, so tagging a commit already on main
+# tab, on any branch, which builds every platform without publishing anything.
+# A tag and a branch are separate refs, so tagging a commit already on main
 # builds it again rather than reusing the rolling build's binaries - the same
 # sources, but a set of assets that belongs to the release and is not deleted
 # out from under it on the next merge.
@@ -23,6 +24,10 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Actions are pinned to the commit a release tag points at, not the tag: a tag
+# can be moved after the fact, and this workflow publishes releases with write
+# access to the repository. The comment says which release each commit is.
+
 jobs:
   # Pull requests only compile-check on Linux. Private-repo minutes bill at
   # 1x on Linux but 2x on Windows and 10x on macOS, which makes the full
@@ -33,11 +38,12 @@ jobs:
     name: Check (Linux)
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26'
           cache: true
@@ -66,6 +72,7 @@ jobs:
     name: ${{ matrix.label }}
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     strategy:
       fail-fast: false          # one platform failing shouldn't hide the others
       matrix:
@@ -76,55 +83,63 @@ jobs:
           - os: macos-latest
             label: macOS
             artifact: Sablewright-macOS
-          - os: ubuntu-22.04
+          # 24.04 is the oldest image with GTK 4 and WebKitGTK 6.0, and a
+          # binary linked against its glibc (2.39) runs on newer systems but
+          # never older ones, so it sets the floor the packages declare.
+          - os: ubuntu-24.04
             label: Linux
             artifact: Sablewright-Linux
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: '1.26'
           cache: true
 
-      # Wails needs GTK and WebKit headers to compile on Linux. Ubuntu 22.04 is
-      # still the runner because its glibc is the oldest of the images, and a
-      # binary linked against an older glibc runs on newer systems but never
-      # the other way round. WebKit is taken at 4.1 rather than the 4.0 that
-      # 22.04 defaults to: 24.04 and Debian 13 dropped 4.0 entirely and Arch
-      # only ever had 4.1, so a package built against 4.0 would be
-      # uninstallable on most current systems.
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+          sudo apt-get install -y build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
 
-      - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+      # The app itself is built with plain `go build`. The Wails CLI is only
+      # a tool here: the Windows resources and installer bootstrapper, and
+      # the macOS disk image. Pinned to the same version as the library.
+      - name: Install the Wails CLI
+        if: runner.os != 'Linux'
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
 
-      # One version number for everything. Wails already reads productVersion
-      # out of wails.json for the Windows file properties, so making it the
-      # source for the in-app version and the Linux packages too means one
-      # place to bump instead of four that drift. The commit rides along
-      # because every merge replaces the same rolling release: the number
-      # alone cannot tell two downloads apart.
+      # One version number for everything, read from build/config.yml: the
+      # in-app version, the macOS bundle, the Windows file properties and
+      # installer, and the Linux packages all get it from here. The commit
+      # rides along because every merge replaces the same rolling release:
+      # the number alone cannot tell two downloads apart.
+      #
+      # RELEASE numbers the Linux packages of rolling builds, so two builds
+      # of the same version are never two different packages with the same
+      # name and version. A tagged release leaves it empty and gets the
+      # plain version.
       - name: Work out the build version
         shell: bash
         run: |
-          V="$(sed -n 's/.*"productVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' wails.json | head -1)"
-          [ -n "$V" ] || { echo "No productVersion found in wails.json"; exit 1; }
+          V="$(awk '/^info:/{f=1;next} /^[^[:space:]#]/{f=0}
+                    f && $1=="version:"{v=$2; gsub(/"/,"",v); print v; exit}' build/config.yml)"
+          [ -n "$V" ] || { echo "No info.version found in build/config.yml"; exit 1; }
           # A release is only worth cutting if the binaries inside it agree with
-          # the name on the outside. Tagging v1.2.0 while wails.json still says
-          # 1.1.0 would ship packages named after the old version and an app
-          # that reports it, so fail here instead of publishing the mismatch.
+          # the name on the outside. Tagging v2.1.0 while build/config.yml still
+          # says 2.0.0 would ship packages named after the old version and an
+          # app that reports it, so fail here instead of publishing the mismatch.
           if [ "${GITHUB_REF_TYPE:-}" = tag ]; then
             [ "${GITHUB_REF_NAME#v}" = "$V" ] || {
-              echo "Tag $GITHUB_REF_NAME does not match productVersion $V in wails.json"
+              echo "Tag $GITHUB_REF_NAME does not match info.version $V in build/config.yml"
               exit 1
             }
+            echo "RELEASE=" >> "$GITHUB_ENV"
+          else
+            echo "RELEASE=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           fi
           echo "VERSION=$V" >> "$GITHUB_ENV"
           echo "LDFLAGS=-w -s -X main.version=$V -X main.commit=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
@@ -136,10 +151,32 @@ jobs:
       - name: Download Go dependencies
         run: go mod download
 
+      # Every platform, every build: the pull request check only covers
+      # Linux, and a release should never be the first time the tests run
+      # on Windows or macOS.
+      - name: Test
+        run: go test ./...
+
       # ---- Windows: a single .exe, plus an NSIS installer ----
+      #
+      # The .syso carries the icon, the file properties and the manifest into
+      # the .exe. The manifest is not optional: it opts into version 6 of the
+      # common controls, which is what lets the confirm dialogs show their own
+      # button labels instead of a fixed Yes and No.
       - name: Build (Windows)
         if: runner.os == 'Windows'
-        run: wails build -platform windows/amd64 -webview2 embed -ldflags "${{ env.LDFLAGS }}"
+        shell: bash
+        env:
+          CGO_ENABLED: '0'
+        run: |
+          set -euo pipefail
+          mkdir -p build/bin
+          sed -i "s/0\.0\.0/$VERSION/g" build/windows/info.json
+          wails3 generate syso -arch amd64 -icon build/windows/icon.ico \
+            -manifest build/windows/wails.exe.manifest -info build/windows/info.json \
+            -out wails_windows_amd64.syso
+          go build -tags production -trimpath -buildvcs=false \
+            -ldflags "$LDFLAGS -H windowsgui" -o build/bin/Sablewright.exe .
 
       # windows-latest is Windows Server 2025, and that image dropped the NSIS
       # that windows-2022 shipped, so makensis has to be installed explicitly.
@@ -152,20 +189,27 @@ jobs:
           choco install nsis -y --no-progress
           "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
+      # The installer carries Microsoft's WebView2 bootstrapper and runs it on
+      # a PC that lacks the runtime. The bare .exe has no equivalent in Wails
+      # v3, so it needs WebView2 already installed - which Windows 11 always
+      # has. makensis runs from the script's own folder, so the paths inside
+      # project.nsi are relative to build/windows/nsis.
       - name: Build installer (Windows)
         if: runner.os == 'Windows'
-        run: wails build -platform windows/amd64 -webview2 embed -nsis -ldflags "${{ env.LDFLAGS }}"
+        run: |
+          wails3 generate webview2bootstrapper -dir build/windows/nsis
+          makensis "-DARG_WAILS_AMD64_BINARY=$PWD\build\bin\Sablewright.exe" "-DINFO_PRODUCTVERSION=$env:VERSION" build\windows\nsis\project.nsi
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed" }
 
-      # Wails only *warns* when makensis is missing, so the step above exits 0
-      # having produced nothing. That is exactly how a silently-broken
-      # installer survived the whole life of this workflow, so assert on the
-      # file rather than trusting the exit code.
+      # Assert on the file rather than trusting an exit code: that is how a
+      # silently-broken installer once survived the whole life of this
+      # workflow.
       - name: Verify the installer exists (Windows)
         if: runner.os == 'Windows'
         run: |
           $installer = Get-ChildItem build/bin -Filter *installer*.exe -ErrorAction SilentlyContinue
           if (-not $installer) {
-            throw "No NSIS installer in build/bin - is makensis on PATH?"
+            throw "No NSIS installer in build/bin"
           }
           "Built $($installer.Name) ($([math]::Round($installer.Length / 1MB, 1)) MB)"
 
@@ -173,130 +217,88 @@ jobs:
       #
       # arm64 rather than universal: Apple Silicon is the only configuration
       # this app is supported on, and a single slice halves the download.
-      # The runner is already arm64, so this is a native build.
+      # The runner is already arm64, so this is a native build. 12.0 is the
+      # oldest macOS Wails v3 supports.
       - name: Build (macOS)
         if: runner.os == 'macOS'
-        run: wails build -platform darwin/arm64 -ldflags "${{ env.LDFLAGS }}"
-
-      # The GPL asks that a copy travel with the binary, and the embedded paint
-      # data is MIT, whose notice has to reach whoever holds a copy - so both
-      # files go inside the bundle rather than only into the release.
-      #
-      # This has to run before the signing step. codesign seals the contents of
-      # Contents/Resources, so a file added afterwards leaves the bundle with a
-      # signature that no longer matches what it covers - which is the same
-      # invalid-signature state, and the same "app is damaged" Gatekeeper
-      # message, that the re-signing below exists to avoid.
-      - name: Add the license files to the bundle (macOS)
-        if: runner.os == 'macOS'
+        env:
+          CGO_ENABLED: '1'
+          MACOSX_DEPLOYMENT_TARGET: '12.0'
+          CGO_CFLAGS: -mmacosx-version-min=12.0
+          CGO_LDFLAGS: -mmacosx-version-min=12.0
         run: |
-          set -euo pipefail
-          RES=build/bin/Sablewright.app/Contents/Resources
-          cp LICENSE THIRD-PARTY-NOTICES.md "$RES/"
-          ls -l "$RES/LICENSE" "$RES/THIRD-PARTY-NOTICES.md"
+          mkdir -p build/bin
+          go build -tags production -trimpath -buildvcs=false \
+            -ldflags "$LDFLAGS" -o build/bin/Sablewright .
 
-      # The Go linker ad-hoc signs the arm64 executable it produces, but it
-      # signs a *binary*, not a bundle: nothing writes the resource seal at
-      # Contents/_CodeSignature/CodeResources. codesign then reads a signature
-      # that declares sealed resources next to a bundle that has none and
-      # rejects it outright - "code has no resources but signature indicates
-      # they must be present". That is an invalid signature rather than an
-      # untrusted one, and an invalid signature is what makes Gatekeeper say
-      # the download is damaged and should be moved to the Trash.
+      # The bundle is put together by hand: the binary, the Info.plist with
+      # this build's version stamped in, and the icon. The GPL asks that a
+      # copy travel with the binary, and the embedded paint data is MIT, whose
+      # notice has to reach whoever holds a copy - so both license files go
+      # inside the bundle rather than only into the release.
       #
-      # The universal build this replaced never hit it: lipo strips the
-      # linker's signature when it fuses the slices, so that bundle was
-      # unsigned rather than half-signed, and unsigned only ever got the
-      # ordinary unidentified-developer prompt.
+      # Everything goes in before signing. codesign seals the contents of
+      # Contents/Resources, and a file added afterwards leaves a signature
+      # that no longer matches - the invalid-signature state that makes
+      # Gatekeeper call the download damaged.
       #
-      # Re-signing the whole bundle writes the seal and makes the signature
-      # verify. --sign - is ad-hoc, which is all that is available without a
-      # paid Developer ID, so first launch still needs Open Anyway - but the
-      # app is now openable at all, which it was not before. --identifier
+      # --sign - is ad-hoc, which is all that is available without a paid
+      # Developer ID, so first launch still needs Open Anyway. --identifier
       # matches CFBundleIdentifier so the signature does not keep the "a.out"
-      # the linker had defaulted to.
-      - name: Sign the app bundle (macOS)
+      # the linker defaults to.
+      - name: Assemble and sign the app bundle (macOS)
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
           APP=build/bin/Sablewright.app
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          mv build/bin/Sablewright "$APP/Contents/MacOS/Sablewright"
+          cp build/darwin/Info.plist "$APP/Contents/Info.plist"
+          plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+          plutil -replace CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist"
+          cp build/darwin/icons.icns LICENSE THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/"
           codesign --force --deep --sign - \
             --identifier "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" \
             "$APP"
-          # Assert on the verification rather than on codesign's exit code:
-          # this step exists only to stop a bundle that fails --strict from
-          # reaching a release again, so it has to be the thing that is checked.
           codesign --verify --deep --strict --verbose=2 "$APP"
 
-      - name: Install create-dmg (macOS)
-        if: runner.os == 'macOS'
-        run: brew install create-dmg
-
+      # wails3 builds the image with hdiutil alone - no Finder scripting, so
+      # none of the race create-dmg used to lose on CI runners. It picks up
+      # build/bin/Sablewright.app and writes build/bin/Sablewright.dmg, with
+      # an Applications link to drag onto.
+      #
+      # Verifying the bundle before it was imaged only proves the bundle was
+      # fine. Gatekeeper judges the copy dragged out of the image, so the
+      # finished DMG is mounted and that copy verified too.
       - name: Build the DMG (macOS)
         if: runner.os == 'macOS'
         run: |
-          set -uo pipefail
-          APP=build/bin/Sablewright.app
-          DMG=build/bin/Sablewright-macOS.dmg
-
-          # create-dmg images the *contents* of the folder it is given, so the
-          # .app goes into a staging directory of its own rather than being
-          # passed directly - otherwise the bundle is unwrapped into the image.
-          # ditto rather than cp: it preserves the bundle's permissions and
-          # extended attributes, which is what makes the app launchable.
-          STAGE="$(mktemp -d)"
-          ditto "$APP" "$STAGE/Sablewright.app"
-
-          # Wails compiles build/appicon.png into the bundle; reuse the result
-          # as the volume icon so the mounted disk isn't a blank drive.
-          #
-          # --volname leads the array so it is never empty: macOS ships bash
-          # 3.2, where expanding an empty array trips `set -u`.
-          # The `|| true` is load-bearing: with an unmatched glob ls exits 1,
-          # pipefail carries that to the assignment, and the step's `bash -e`
-          # would abort the build over a missing volume icon.
-          OPTS=(--volname Sablewright)
-          ICNS="$(ls "$APP"/Contents/Resources/*.icns 2>/dev/null | head -1 || true)"
-          [ -n "$ICNS" ] && OPTS+=(--volicon "$ICNS")
-          OPTS+=(--window-pos 200 120 --window-size 600 400 --icon-size 110
-                 --icon Sablewright.app 150 190
-                 --hide-extension Sablewright.app
-                 --app-drop-link 450 190)
-
-          # create-dmg lays the window out by driving the Finder over
-          # AppleScript, which intermittently loses a race against the volume
-          # it just mounted on a CI runner. That is flaky rather than broken,
-          # so retry once before treating it as a real failure.
-          for attempt in 1 2; do
-            rm -f "$DMG"
-            create-dmg "${OPTS[@]}" "$DMG" "$STAGE" && break
-            echo "create-dmg attempt $attempt failed"
-          done
-
-          # Assert on the file rather than the exit code, for the same reason
-          # the NSIS step above does.
-          [ -f "$DMG" ] || { echo "No DMG in build/bin - create-dmg failed twice."; exit 1; }
+          set -euo pipefail
+          wails3 tool package --format dmg --name Sablewright --out build/bin
+          DMG=build/bin/Sablewright.dmg
+          [ -f "$DMG" ] || { echo "No DMG in build/bin"; exit 1; }
           ls -lh "$DMG"
-
-          # Verifying the bundle before it was imaged only proves the bundle
-          # was fine. Gatekeeper judges the copy the user drags out of the
-          # image, so check that one: mount the finished DMG and re-verify
-          # from there. -nobrowse keeps the runner's Finder out of it, and the
-          # detach is a trap so a failed verify still releases the device.
           MNT="$(mktemp -d)"
           hdiutil attach -nobrowse -readonly -mountpoint "$MNT" "$DMG"
           trap 'hdiutil detach "$MNT" -quiet || true' EXIT
           codesign --verify --deep --strict --verbose=2 "$MNT/Sablewright.app"
+          # The bundle is now inside the image; leaving the loose copy out of
+          # the artifact keeps the upload to what is published.
+          rm -rf build/bin/Sablewright.app
 
-      # ---- Linux: a bare binary, plus .deb and Arch packages ----
+      # ---- Linux: a bare binary, plus .deb, .rpm and Arch packages ----
       - name: Build (Linux)
         if: runner.os == 'Linux'
-        run: wails build -platform linux/amd64 -tags webkit2_41 -ldflags "${{ env.LDFLAGS }}"
+        run: |
+          mkdir -p build/bin
+          go build -tags production -trimpath -buildvcs=false \
+            -ldflags "$LDFLAGS" -o build/bin/Sablewright .
 
-      # nfpm builds both package formats from one config without root or a
-      # container, and `go install` is the cheapest way to get it given Go is
-      # already set up above. Pinned rather than @latest so a release upstream
-      # can't change what this produces.
+      # nfpm builds all three package formats from one config without root or
+      # a container, and `go install` is the cheapest way to get it given Go
+      # is already set up above. Pinned rather than @latest so a release
+      # upstream can't change what this produces.
       - name: Install nfpm
         if: runner.os == 'Linux'
         run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
@@ -308,10 +310,11 @@ jobs:
           nfpm pkg -f build/linux/nfpm.yaml --packager rpm       --target build/bin/
           nfpm pkg -f build/linux/nfpm.yaml --packager archlinux --target build/bin/
 
-      # Same reasoning as the NSIS check: assert on the files rather than
-      # trusting an exit code, so a packaging step that quietly produces
-      # nothing fails here instead of shipping an incomplete release.
-      - name: Verify the packages exist (Linux)
+      # Same reasoning as the installer check: assert on the files rather than
+      # trusting an exit code. Then install the .deb on this runner - the
+      # oldest system the packages support - so a dependency named wrong fails
+      # the build here instead of failing on someone's machine.
+      - name: Verify the packages (Linux)
         if: runner.os == 'Linux'
         run: |
           shopt -s nullglob
@@ -320,18 +323,15 @@ jobs:
           [ ${#rpms[@]} -gt 0 ] || { echo "nfpm produced no .rpm";  exit 1; }
           [ ${#arch[@]} -gt 0 ] || { echo "nfpm produced no Arch package"; exit 1; }
           ls -lh "${deb[@]}" "${rpms[@]}" "${arch[@]}"
-
-          # A package whose dependencies don't resolve installs nowhere, and
-          # that stays invisible until someone tries it. Printing what each
-          # one actually requires puts the answer in the build log, where a
-          # wrong package name is obvious rather than latent. Diagnostics
-          # only, so a runner image without rpm skips it rather than failing.
           dpkg-deb --info "${deb[0]}"
           if command -v rpm >/dev/null 2>&1; then
             rpm -qp --requires "${rpms[0]}"
           else
             echo "(rpm not on this image - skipping the requires dump)"
           fi
+          sudo apt-get install -y "./${deb[0]}"
+          dpkg -s sablewright | head -5
+          sudo apt-get remove -y sablewright
 
       # The Linux packages install these to /usr/share/doc and the macOS bundle
       # carries them internally, but a bare .exe has nowhere to put a file.
@@ -346,7 +346,7 @@ jobs:
         shell: bash
 
       - name: Upload build
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact }}
           path: |
@@ -358,7 +358,7 @@ jobs:
             build/bin/Sablewright
             build/bin/LICENSE
             build/bin/THIRD-PARTY-NOTICES.md
-          if-no-files-found: warn
+          if-no-files-found: error
           # These are now just a hand-off to the release job, which keeps the
           # durable copy. Short retention plus the cleanup job below is what
           # keeps the 500 MB free-tier artifact quota flat.
@@ -382,29 +382,30 @@ jobs:
       github.event_name == 'push' &&
       (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:
       # Not merge-multiple: keeping one directory per artifact means the
       # platform is known from the path rather than guessed from a filename.
       - name: Collect the platform builds
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
 
-      # Give every asset a self-describing name. Wails names its output after
-      # the app, so the Linux binary arrives as a bare "Sablewright" and sits
-      # in the release next to "Sablewright.exe" telling you nothing about
-      # which platform it is for.
+      # Give every asset a self-describing name. The builds are named after
+      # the app, so the Linux binary arrives as a bare "Sablewright" and would
+      # sit in the release next to "Sablewright.exe" telling you nothing
+      # about which platform it is for.
       - name: Name the assets by platform
         run: |
           set -euo pipefail
           shopt -s nullglob
           mkdir -p release
-          cp artifacts/Sablewright-Windows/Sablewright.exe     release/Sablewright-Windows.exe
-          cp artifacts/Sablewright-macOS/Sablewright-macOS.dmg release/Sablewright-macOS.dmg
-          cp artifacts/Sablewright-Linux/Sablewright           release/Sablewright-Linux
-          # Wails names the installer with the arch, so match it by pattern.
+          cp artifacts/Sablewright-Windows/Sablewright.exe  release/Sablewright-Windows.exe
+          cp artifacts/Sablewright-macOS/Sablewright.dmg    release/Sablewright-macOS.dmg
+          cp artifacts/Sablewright-Linux/Sablewright        release/Sablewright-Linux
+          # The installer is named with the arch, so match it by pattern.
           for f in artifacts/Sablewright-Windows/*installer*.exe; do
             cp "$f" release/Sablewright-Windows-installer.exe
           done
@@ -466,9 +467,10 @@ jobs:
 
           Produced by [run ${GITHUB_RUN_ID}](https://github.com/${REPO}/actions/runs/${GITHUB_RUN_ID}). Replaced on every merge to main."
 
-  # Only the newest set of binaries is worth keeping. The free tier allows
-  # 500 MB of artifact storage and each run stores roughly 16 MB, so without
-  # this the quota fills after about thirty merges and uploads start failing.
+  # Only the newest set of binaries for each branch or tag is worth keeping.
+  # The free tier allows 500 MB of artifact storage and each run stores
+  # roughly 16 MB, so without this the quota fills after about thirty merges
+  # and uploads start failing.
   #
   # This runs only after every platform succeeded, so a failed build never
   # deletes the last known-good binaries.
@@ -477,19 +479,26 @@ jobs:
     needs: build
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       actions: write
     steps:
-      # This is the only workflow in the repo, so "not from this run" is the
-      # same as "superseded". Revisit the filter if a second one is added.
-      - name: Delete artifacts from earlier runs
+      # Only artifacts from earlier runs of this same branch or tag are
+      # superseded. A run for another ref - a tag pushed while main was
+      # building, say - may still have a release job waiting to download its
+      # artifacts, so those are left to expire on their own instead. Runs of
+      # the same ref never overlap: the concurrency group cancels the older.
+      - name: Delete artifacts from earlier runs of this ref
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
           gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" \
-            --jq ".artifacts[] | select(.workflow_run.id != $RUN_ID) | .id" \
+            --jq ".artifacts[]
+                  | select(.workflow_run.id != $RUN_ID and .workflow_run.head_branch == \"$REF_NAME\")
+                  | .id" \
             > stale.txt
           echo "$(wc -l < stale.txt) superseded artifact(s) to remove"
           while read -r id; do
