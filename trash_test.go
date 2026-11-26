@@ -156,3 +156,47 @@ func TestSnapshotOnStartupSkipsACopyOfAnUnchangedCollection(t *testing.T) {
 		t.Errorf("five launches of an unchanged collection left %v, want only the first copy", made)
 	}
 }
+
+// Once a collection has been found unreadable, the copies taken before it are
+// the good ones. Launches on the fresh collection that replaced it must not
+// rotate them out, however many there are.
+func TestSnapshotOnStartupKeepsTheCopiesFromBeforeALoss(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100, Models: []Model{{ID: 1, Name: "Marine", Count: 1}}}
+	launch := func(stamp, notes string) {
+		t.Helper()
+		s.data.Models[0].Notes = notes
+		if err := s.persist(); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SnapshotOnStartup(stamp); err != nil {
+			t.Fatalf("SnapshotOnStartup(): %v", err)
+		}
+	}
+	good := []string{"20260801-090000", "20260802-090000", "20260803-090000"}
+	for i, stamp := range good {
+		launch(stamp, fmt.Sprintf("good %d", i))
+	}
+	// The file is found unreadable and set aside on the 4th.
+	if err := os.WriteFile(s.path+".corrupt-20260804-090000", []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for i := 5; i <= 9; i++ {
+		launch(fmt.Sprintf("202608%02d-090000", i), fmt.Sprintf("after %d", i))
+	}
+
+	made, err := s.rollingSnapshots()
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(made, " ")
+	for _, stamp := range good {
+		if !strings.Contains(joined, stamp) {
+			t.Errorf("the good copy from %s was rotated out: %v", stamp, made)
+		}
+	}
+	if len(made) != len(good)+rollingBackups {
+		t.Errorf("kept %d copies (%v), want the %d good ones and the %d newest since",
+			len(made), made, len(good), rollingBackups)
+	}
+}

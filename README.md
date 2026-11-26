@@ -191,12 +191,14 @@ opens it. Nothing is uploaded anywhere; the app makes no network connections.
 database and every photo. *Import backup* restores one, which is also how you
 move to a new computer. Importing moves your current collection and photos
 into `backups/before-restore-<date>` first, so importing the wrong file can be
-undone by hand. Only the database and the photos it names are read from a
-backup; anything else in the zip is ignored.
+undone by hand. Only the database and the picture files it names as photos
+are read from a backup; anything else in the zip is ignored.
 
 On top of that the app copies `collection.json` into a `backups` folder every
 time it starts, keeping the last three distinct copies — a launch that changed
-nothing makes no new one. That's for the failure you only notice afterwards — a
+nothing makes no new one. If the collection is ever found unreadable and set
+aside, the copies from before that are kept too, for as long as the set-aside
+file is in the folder. That's for the failure you only notice afterwards — a
 bad import, a mass edit, a file that stopped being readable. Only the database
 is copied, since the photos are large and don't change; a manual backup is
 still the one that carries everything.

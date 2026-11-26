@@ -99,17 +99,22 @@ set "PATH=%GOBIN%;%PATH%"
 
 rem Always installed, even over an existing copy: `go install` of a pinned
 rem version is quick when it's already there, and an older Wails left over
-rem from a previous build would otherwise be used without a word.
+rem from a previous build would otherwise be used without a word - so a
+rem failed install stops here rather than falling back on it.
 "%GOEXE%" install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+if errorlevel 1 goto :wails_failed
+if not exist "%GOBIN%\wails.exe" goto :wails_failed
+goto :wails_ready
 
-if not exist "%GOBIN%\wails.exe" (
-    echo.
-    echo   [X] The Wails tool didn't install. The usual cause is no internet
-    echo       connection, or a proxy blocking downloads.
-    echo.
-    pause
-    exit /b 1
-)
+:wails_failed
+echo.
+echo   [X] The Wails tool didn't install. The usual cause is no internet
+echo       connection, or a proxy blocking downloads.
+echo.
+pause
+exit /b 1
+
+:wails_ready
 echo         Ready.
 
 rem ---------------------------------------------------------------
