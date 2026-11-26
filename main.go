@@ -9,12 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/linux"
-	"github.com/wailsapp/wails/v2/pkg/options/mac"
-	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 //go:embed all:frontend/dist
@@ -27,7 +22,7 @@ var icon []byte
 // .github/workflows/build.yml and both build scripts. The number itself comes
 // from wails.json, which Wails already uses for the Windows file properties,
 // so there is one place to bump rather than several that drift apart. These
-// defaults are what an unstamped `go build` or `wails dev` leaves behind.
+// defaults are what an unstamped `go build` leaves behind.
 var (
 	version = "dev"
 	commit  = ""
@@ -67,8 +62,54 @@ func (h photoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, f)
 }
 
+// appID names Sablewright to the operating system: the single-instance lock,
+// the GTK application on Linux, and the bundle identifier in build/config.yml.
+const appID = "net.dynamicsyntax.sablewright"
+
+// photoRoutes sends /photos/ to the photo handler and everything else on to
+// the app's own files. Wails v3 has no fallback handler for paths its assets
+// don't cover, so the photos are routed explicitly, ahead of the assets.
+func photoRoutes(photos http.Handler) application.Middleware {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if strings.HasPrefix(r.URL.Path, "/photos/") {
+				photos.ServeHTTP(w, r)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func main() {
 	app := NewApp()
+
+	wails := application.New(application.Options{
+		Name:        "Sablewright",
+		Description: "Track your miniature painting projects.",
+		Icon:        icon,
+		Services:    []application.Service{application.NewService(app)},
+		Assets: application.AssetOptions{
+			Handler:    application.AssetFileServerFS(assets),
+			Middleware: photoRoutes(photoHandler{dir: filepath.Join(DataDir(), "photos")}),
+		},
+		// A second launch stops inside New and hands over to this one, so
+		// it never gets as far as opening the collection below.
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID:               appID,
+			OnSecondInstanceLaunch: app.onSecondInstance,
+		},
+		Mac: application.MacOptions{
+			ApplicationShouldTerminateAfterLastWindowClosed: true,
+		},
+		// ProgramName is what the window manager groups the window under, so
+		// it has to match StartupWMClass in build/linux/sablewright.desktop.
+		Linux: application.LinuxOptions{
+			ProgramName:   "Sablewright",
+			ApplicationID: appID,
+		},
+	})
+	app.app = wails
 
 	store, warning, err := NewStore()
 	if err != nil {
@@ -80,46 +121,20 @@ func main() {
 	app.store = store
 	app.loadErr = warning
 
-	err = wails.Run(&options.App{
-		Title:     "Sablewright",
-		Width:     1180,
-		Height:    760,
-		MinWidth:  940,
-		MinHeight: 600,
-		AssetServer: &assetserver.Options{
-			Assets:  assets,
-			Handler: photoHandler{dir: store.PhotoDir()},
-		},
-		BackgroundColour: &options.RGBA{R: 238, G: 241, B: 245, A: 1},
-		OnStartup:        app.startup,
-		Bind:             []interface{}{app},
-		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId:               "net.dynamicsyntax.sablewright",
-			OnSecondInstanceLaunch: app.onSecondInstance,
-		},
-		Windows: &windows.Options{
-			WebviewIsTransparent: false,
-			WindowIsTranslucent:  false,
-		},
-		// An opaque window matters here: some Linux compositors give the
-		// webview an RGBA visual by default, which makes the whole UI look
-		// washed out because it blends with whatever is behind it.
-		Linux: &linux.Options{
-			Icon:                icon,
-			WindowIsTranslucent: false,
-			WebviewGpuPolicy:    linux.WebviewGpuPolicyOnDemand,
-			ProgramName:         "Sablewright",
-		},
-		Mac: &mac.Options{
-			TitleBar: mac.TitleBarDefault(),
-			About: &mac.AboutInfo{
-				Title:   "Sablewright",
-				Message: "Track your miniature painting projects.",
-				Icon:    icon,
-			},
+	app.win = wails.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            "Sablewright",
+		Width:            1180,
+		Height:           760,
+		MinWidth:         940,
+		MinHeight:        600,
+		BackgroundColour: application.NewRGB(238, 241, 245),
+		Linux: application.LinuxWindow{
+			Icon:             icon,
+			WebviewGpuPolicy: application.WebviewGpuPolicyOnDemand,
 		},
 	})
-	if err != nil {
+
+	if err := wails.Run(); err != nil {
 		fatal("Sablewright hit a problem and had to stop.\n\n" + err.Error())
 	}
 }
