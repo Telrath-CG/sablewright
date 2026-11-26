@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
@@ -68,10 +69,22 @@ func makeThumb(dir, file string) (string, error) {
 		return "", err
 	}
 	defer out.Close()
-	if err := jpeg.Encode(out, small, &jpeg.Options{Quality: thumbQuality}); err != nil {
+	if err := jpeg.Encode(out, flatten(small), &jpeg.Options{Quality: thumbQuality}); err != nil {
 		return "", err
 	}
 	return name, nil
+}
+
+// flatten lays an image over white. JPEG has no transparency, and the
+// encoder reads a transparent pixel's colour as it is stored - black - so a
+// PNG cut out of its background came out as a black square. White is what
+// the photo sits on in the app and on a printed page.
+func flatten(img image.Image) image.Image {
+	b := img.Bounds()
+	out := image.NewRGBA(b)
+	draw.Draw(out, b, image.White, image.Point{}, draw.Src)
+	draw.Draw(out, b, img, b.Min, draw.Over)
+	return out
 }
 
 // decodeImage reads an image file and returns it alongside the EXIF

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -225,14 +226,24 @@ type ProjectMeta struct {
 	Notes string `json:"notes"`
 }
 
+// TrashedPhoto is a photo deleted from a mini, kept for the same month a
+// deleted mini is, so a slip of the mouse can be undone. Its files stay in
+// the photos folder until it is purged.
+type TrashedPhoto struct {
+	ModelID int    `json:"modelId"`
+	Photo   Photo  `json:"photo"`
+	Deleted string `json:"deleted"` // YYYY-MM-DD
+}
+
 type Data struct {
-	Version  int           `json:"version"`
-	NextID   int           `json:"nextId"`
-	Models   []Model       `json:"models"`
-	Paints   []Paint       `json:"paints"`
-	Tips     []Tip         `json:"tips"`
-	Trash    []Trashed     `json:"trash"`
-	Projects []ProjectMeta `json:"projects"`
+	Version    int            `json:"version"`
+	NextID     int            `json:"nextId"`
+	Models     []Model        `json:"models"`
+	Paints     []Paint        `json:"paints"`
+	Tips       []Tip          `json:"tips"`
+	Trash      []Trashed      `json:"trash"`
+	PhotoTrash []TrashedPhoto `json:"photoTrash,omitempty"`
+	Projects   []ProjectMeta  `json:"projects"`
 }
 
 // Store owns the data file and guards it with a mutex.
@@ -241,6 +252,11 @@ type Store struct {
 	dir  string
 	path string
 	data Data
+	// gen counts collections: RestoreFrom replaces the whole thing and
+	// bumps it. Work done outside the lock checks it on the way back in, so
+	// a photo copied while an import ran isn't filed under whichever mini
+	// shares its id in the collection that replaced it.
+	gen uint64
 }
 
 var Statuses = []string{"Backlog", "Assembled", "Primed", "In Progress", "Complete", "Display"}
@@ -833,7 +849,7 @@ func (s *Store) RestoreModel(id int) (Model, error) {
 }
 
 // PurgeTrash destroys what has sat in the trash past its month, photos and
-// all, and reports how many went. Called on the way in rather than on a
+// all, and reports how many minis went. Called on the way in rather than on a
 // timer: the app is only ever open for as long as someone is using it.
 func (s *Store) PurgeTrash(now time.Time) int {
 	s.mu.Lock()
@@ -851,51 +867,129 @@ func (s *Store) PurgeTrash(now time.Time) int {
 		}
 		gone++
 	}
-	if gone == 0 {
+	keptPhotos := make([]TrashedPhoto, 0, len(s.data.PhotoTrash))
+	photosGone := 0
+	for _, t := range s.data.PhotoTrash {
+		if t.Deleted > cutoff {
+			keptPhotos = append(keptPhotos, t)
+			continue
+		}
+		s.removePhotoFiles(t.Photo)
+		photosGone++
+	}
+	if gone == 0 && photosGone == 0 {
 		return 0
 	}
 	s.data.Trash = kept
+	s.data.PhotoTrash = keptPhotos
 	_ = s.persist()
 	return gone
 }
 
+// AddPhoto copies an image into the photos folder and files it under a mini.
+//
+// The copy and the thumbnail are made before the store is locked: decoding a
+// large photo takes a noticeable moment, and every other call - a keystroke in
+// a search box, the dashboard - would otherwise wait for it.
 func (s *Store) AddPhoto(modelID int, srcPath, kind string) (Model, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	idx := -1
-	for i, m := range s.data.Models {
-		if m.ID == modelID {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		return Model{}, fmt.Errorf("that mini no longer exists")
-	}
 	// Only picture formats are kept: OpenPhoto hands these files to the
 	// system opener, which would run anything else as readily as show it.
 	ext := strings.ToLower(filepath.Ext(srcPath))
 	if !photoExts[ext] {
 		return Model{}, fmt.Errorf("%s isn't a picture format Sablewright keeps", filepath.Base(srcPath))
 	}
-	name := fmt.Sprintf("m%d_%d%s", modelID, time.Now().UnixNano(), ext)
-	dst := filepath.Join(s.PhotoDir(), name)
+	s.mu.RLock()
+	gen := s.gen
+	s.mu.RUnlock()
+	if _, ok := s.ModelByID(modelID); !ok {
+		return Model{}, fmt.Errorf("that mini no longer exists")
+	}
 	in, err := os.ReadFile(srcPath)
 	if err != nil {
 		return Model{}, fmt.Errorf("could not read that image: %w", err)
 	}
-	if err := os.WriteFile(dst, in, 0o644); err != nil {
+	name, err := s.newPhotoFile(modelID, ext, in)
+	if err != nil {
 		return Model{}, fmt.Errorf("could not save that image: %w", err)
 	}
 	// A photo the decoder can't read is still a photo. It keeps its full-size
 	// copy and simply has no thumbnail, which every drawing site allows for.
 	thumb, _ := makeThumb(s.PhotoDir(), name)
-	s.data.Models[idx].Photos = append(s.data.Models[idx].Photos, Photo{
-		ID: s.nextID(), File: name, Thumb: thumb, Kind: kind, Added: today(),
-	})
-	return s.data.Models[idx], s.persist()
+	photo := Photo{File: name, Thumb: thumb, Kind: kind}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.gen != gen {
+		s.removePhotoFiles(photo)
+		return Model{}, fmt.Errorf("the collection was replaced while that photo was being added")
+	}
+	for i := range s.data.Models {
+		if s.data.Models[i].ID == modelID {
+			photo.ID, photo.Added = s.nextID(), today()
+			s.data.Models[i].Photos = append(s.data.Models[i].Photos, photo)
+			return s.data.Models[i], s.persist()
+		}
+	}
+	// Deleted while the photo was being copied: nothing to file it under.
+	s.removePhotoFiles(photo)
+	return Model{}, fmt.Errorf("that mini no longer exists")
 }
 
+// newPhotoFile writes a new photo into the photos folder under a name no
+// other file has, and returns the name. The name carries the clock, which
+// two photos added at once can share on a clock that only counts
+// microseconds, so the file is created exclusively and the next name tried
+// if it's taken - two records must never share a file, or deleting one
+// destroys the other.
+func (s *Store) newPhotoFile(modelID int, ext string, data []byte) (string, error) {
+	stamp := uniqueStamp()
+	for try := 0; try < 100; try++ {
+		name := fmt.Sprintf("m%d_%d%s", modelID, stamp+int64(try), ext)
+		f, err := os.OpenFile(filepath.Join(s.PhotoDir(), name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if os.IsExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if _, err := f.Write(data); err != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return "", err
+		}
+		if err := f.Close(); err != nil {
+			os.Remove(f.Name())
+			return "", err
+		}
+		return name, nil
+	}
+	return "", fmt.Errorf("no free file name in the photos folder")
+}
+
+// lastStamp is the last photo stamp handed out.
+var lastStamp atomic.Int64
+
+// uniqueStamp is the clock in nanoseconds, but never the same value twice in
+// one run of the app. A photo's name and its thumbnail's are both made from
+// it, and the thumbnail's drops the extension - so two photos stamped alike,
+// one .png and one .jpg, would share a thumbnail even with distinct names.
+func uniqueStamp() int64 {
+	for {
+		last := lastStamp.Load()
+		now := time.Now().UnixNano()
+		if now <= last {
+			now = last + 1
+		}
+		if lastStamp.CompareAndSwap(last, now) {
+			return now
+		}
+	}
+}
+
+// DeletePhoto takes a photo off a mini and into the photo trash, where
+// UndoDeletePhoto can fetch it back. Its files stay where they are until the
+// trash is purged: the delete sits a few pixels from the cover star, and a
+// photo of a mini part-painted months ago cannot be retaken.
 func (s *Store) DeletePhoto(modelID, photoID int) (Model, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -905,12 +999,50 @@ func (s *Store) DeletePhoto(modelID, photoID int) (Model, error) {
 		}
 		for j, p := range m.Photos {
 			if p.ID == photoID {
-				s.removePhotoFiles(p)
+				s.data.PhotoTrash = append(s.data.PhotoTrash,
+					TrashedPhoto{ModelID: modelID, Photo: p, Deleted: today()})
 				s.data.Models[i].Photos = append(m.Photos[:j], m.Photos[j+1:]...)
 				return s.data.Models[i], s.persist()
 			}
 		}
 		return m, nil
+	}
+	return Model{}, fmt.Errorf("that mini no longer exists")
+}
+
+// UndoDeletePhoto puts a trashed photo back on its mini, in the place its
+// age gives it among the others.
+func (s *Store) UndoDeletePhoto(modelID, photoID int) (Model, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	at := -1
+	for k, t := range s.data.PhotoTrash {
+		if t.ModelID == modelID && t.Photo.ID == photoID {
+			at = k
+			break
+		}
+	}
+	if at < 0 {
+		return Model{}, fmt.Errorf("that photo is no longer in the trash")
+	}
+	for i, m := range s.data.Models {
+		if m.ID != modelID {
+			continue
+		}
+		p := s.data.PhotoTrash[at].Photo
+		// A cover chosen since the delete stays the cover.
+		for _, other := range m.Photos {
+			if other.Cover {
+				p.Cover = false
+			}
+		}
+		// Photo ids rise with time, and the list is kept oldest first,
+		// which is what "the newest of a kind" is read from.
+		k := sort.Search(len(m.Photos), func(n int) bool { return m.Photos[n].ID > p.ID })
+		photos := append(append(append([]Photo{}, m.Photos[:k]...), p), m.Photos[k:]...)
+		s.data.Models[i].Photos = photos
+		s.data.PhotoTrash = append(s.data.PhotoTrash[:at], s.data.PhotoTrash[at+1:]...)
+		return s.data.Models[i], s.persist()
 	}
 	return Model{}, fmt.Errorf("that mini no longer exists")
 }

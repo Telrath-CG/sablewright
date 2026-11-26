@@ -90,10 +90,12 @@ project across every mini at once, or ungroups them without deleting anything.
 
 **Painting log** — the point of this is to record what actually happened at the
 desk. Open a mini, go to the *Painting log* tab, and add a dated entry with an
-optional number of minutes: *"Nuln Oil recess shading done, started edge
-highlights."* Entries show newest-first as a timeline on the mini's detail
-panel, and the total time is tallied per mini and across the collection. If a
-mini has no start date, the earliest log entry becomes it.
+optional time — `90`, `1h 30m` and `1:30` all work: *"Nuln Oil recess shading
+done, started edge highlights."* Entries show newest-first as a timeline on the
+mini's detail panel, and the total time is tallied per mini and across the
+collection. If a mini has no start date, the earliest log entry becomes it. An
+entry written but not yet added is saved along with the mini, and closing the
+dialog with one still in the form asks first.
 
 **Paint Inventory** — the rack comes stocked with 1,419 paints across six
 ranges, so you tick off what you own rather than typing it all in:
@@ -220,10 +222,13 @@ window forward, since two copies would each save over the other's changes.
 it, and the toast offers *Undo* on the spot. Notes and a status can be typed
 again; a photo of a mini part-painted three months ago can't be retaken. It
 leaves the app immediately either way — nothing reads the trash — and after
-30 days it and its photos go for good.
+30 days it and its photos go for good. Deleting a single photo or a log entry
+offers the same *Undo*, and a deleted photo's file is kept for the same 30
+days.
 
-**Keyboard** — on the Models screen, ↑ and ↓ walk the list and Enter opens
-the highlighted mini for editing.
+**Keyboard** — Tab reaches the sidebar, and Enter or Space opens a screen. On
+the Models screen, ↑ and ↓ walk the list and Enter opens the highlighted mini
+for editing.
 
 ### Why JSON and not SQLite
 
