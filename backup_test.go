@@ -108,3 +108,36 @@ func TestMarkdownExportEncodesSpacesInImagePaths(t *testing.T) {
 		t.Errorf("the photo wasn't copied beside the note: %v", err)
 	}
 }
+
+// Photos added at the same moment must each get a file of their own: two
+// records sharing one file means deleting one destroys the other.
+func TestAddPhotoGivesEveryPhotoItsOwnFile(t *testing.T) {
+	s := currentCollection(t)
+	src := filepath.Join(t.TempDir(), "shot.jpg")
+	if err := os.WriteFile(src, []byte("not really a jpeg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	const n = 32
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		go func() {
+			_, err := s.AddPhoto(1, src, "Progress")
+			errs <- err
+		}()
+	}
+	for i := 0; i < n; i++ {
+		if err := <-errs; err != nil {
+			t.Fatalf("AddPhoto(): %v", err)
+		}
+	}
+	files := map[string]bool{}
+	for _, p := range s.data.Models[0].Photos {
+		if files[p.File] {
+			t.Errorf("two photos share %s", p.File)
+		}
+		files[p.File] = true
+	}
+	if len(files) != n {
+		t.Errorf("%d distinct files for %d photos", len(files), n)
+	}
+}

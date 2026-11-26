@@ -251,6 +251,11 @@ type Store struct {
 	dir  string
 	path string
 	data Data
+	// gen counts collections: RestoreFrom replaces the whole thing and
+	// bumps it. Work done outside the lock checks it on the way back in, so
+	// a photo copied while an import ran isn't filed under whichever mini
+	// shares its id in the collection that replaced it.
+	gen uint64
 }
 
 var Statuses = []string{"Backlog", "Assembled", "Primed", "In Progress", "Complete", "Display"}
@@ -843,7 +848,7 @@ func (s *Store) RestoreModel(id int) (Model, error) {
 }
 
 // PurgeTrash destroys what has sat in the trash past its month, photos and
-// all, and reports how many went. Called on the way in rather than on a
+// all, and reports how many minis went. Called on the way in rather than on a
 // timer: the app is only ever open for as long as someone is using it.
 func (s *Store) PurgeTrash(now time.Time) int {
 	s.mu.Lock()
@@ -892,16 +897,18 @@ func (s *Store) AddPhoto(modelID int, srcPath, kind string) (Model, error) {
 	if !photoExts[ext] {
 		return Model{}, fmt.Errorf("%s isn't a picture format Sablewright keeps", filepath.Base(srcPath))
 	}
+	s.mu.RLock()
+	gen := s.gen
+	s.mu.RUnlock()
 	if _, ok := s.ModelByID(modelID); !ok {
 		return Model{}, fmt.Errorf("that mini no longer exists")
 	}
-	name := fmt.Sprintf("m%d_%d%s", modelID, time.Now().UnixNano(), ext)
-	dst := filepath.Join(s.PhotoDir(), name)
 	in, err := os.ReadFile(srcPath)
 	if err != nil {
 		return Model{}, fmt.Errorf("could not read that image: %w", err)
 	}
-	if err := os.WriteFile(dst, in, 0o644); err != nil {
+	name, err := s.newPhotoFile(modelID, ext, in)
+	if err != nil {
 		return Model{}, fmt.Errorf("could not save that image: %w", err)
 	}
 	// A photo the decoder can't read is still a photo. It keeps its full-size
@@ -911,6 +918,10 @@ func (s *Store) AddPhoto(modelID int, srcPath, kind string) (Model, error) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.gen != gen {
+		s.removePhotoFiles(photo)
+		return Model{}, fmt.Errorf("the collection was replaced while that photo was being added")
+	}
 	for i := range s.data.Models {
 		if s.data.Models[i].ID == modelID {
 			photo.ID, photo.Added = s.nextID(), today()
@@ -921,6 +932,37 @@ func (s *Store) AddPhoto(modelID int, srcPath, kind string) (Model, error) {
 	// Deleted while the photo was being copied: nothing to file it under.
 	s.removePhotoFiles(photo)
 	return Model{}, fmt.Errorf("that mini no longer exists")
+}
+
+// newPhotoFile writes a new photo into the photos folder under a name no
+// other file has, and returns the name. The name carries the clock, which
+// two photos added at once can share on a clock that only counts
+// microseconds, so the file is created exclusively and the next name tried
+// if it's taken - two records must never share a file, or deleting one
+// destroys the other.
+func (s *Store) newPhotoFile(modelID int, ext string, data []byte) (string, error) {
+	stamp := time.Now().UnixNano()
+	for try := 0; try < 100; try++ {
+		name := fmt.Sprintf("m%d_%d%s", modelID, stamp+int64(try), ext)
+		f, err := os.OpenFile(filepath.Join(s.PhotoDir(), name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if os.IsExist(err) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if _, err := f.Write(data); err != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return "", err
+		}
+		if err := f.Close(); err != nil {
+			os.Remove(f.Name())
+			return "", err
+		}
+		return name, nil
+	}
+	return "", fmt.Errorf("no free file name in the photos folder")
 }
 
 // DeletePhoto takes a photo off a mini and into the photo trash, where

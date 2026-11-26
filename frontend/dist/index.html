@@ -75,8 +75,11 @@
     <div class="modal" id="modal" role="dialog" aria-modal="true"></div>
   </div>
 
-  <!-- A live region, so a screen reader says what just happened. -->
-  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div class="toast" id="toast" hidden></div>
+  <!-- What the toast says, read out by a screen reader. A separate element
+       because the toast is hidden between messages, and a change inside a
+       hidden element often isn't announced. -->
+  <div class="sr-only" id="announce" role="status" aria-live="polite"></div>
 
   <!-- The Wails runtime is served by the app but not injected into the page,
        so it is loaded here; it defines window.wails, which app.js waits for. -->
