@@ -1,10 +1,19 @@
 /* ==========================================================================
    Sablewright - frontend
    Plain JavaScript, no framework and no build step. Go methods are reachable
-   as window.go.main.App.* and each returns a Promise.
+   as App().<method>(...), and each returns a Promise.
    ========================================================================== */
 
-const App = () => window.go.main.App;
+// Every call to Go goes through here. Wails v3 reaches a bound method by its
+// full name, "main.App.<method>"; the proxy turns App().<method>(...) into that
+// call, so the rest of the file reads the same as it did. Go errors reject the
+// promise with the error's text as .message, which call() below shows.
+const App = (() => {
+  const methods = new Proxy({}, {
+    get: (_, name) => (...args) => window.wails.Call.ByName(`main.App.${String(name)}`, ...args),
+  });
+  return () => methods;
+})();
 
 const STATUSES = ["Backlog", "Assembled", "Primed", "In Progress", "Complete", "Display"];
 const STATUS_COLORS = {
@@ -1906,7 +1915,7 @@ async function tipDialog(tip) {
 function ready() {
   return new Promise(resolve => {
     const check = () => {
-      if (window.go && window.go.main && window.go.main.App) return resolve();
+      if (window.wails && window.wails.Call) return resolve();
       setTimeout(check, 30);
     };
     check();
@@ -1914,7 +1923,7 @@ function ready() {
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
-  // Before `ready()`, which waits on the Go bindings: the theme is pure
+  // Before `ready()`, which waits on the Wails runtime: the theme is pure
   // frontend state and shouldn't sit behind the backend coming up.
   initTheme();
   await ready();
