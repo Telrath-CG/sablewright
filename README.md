@@ -22,11 +22,11 @@ to take. Every version carries the same set of downloads:
 | Debian, Ubuntu | `sablewright_<version>-<build>_amd64.deb` |
 | Fedora, RHEL, openSUSE | `sablewright-<version>-<build>.x86_64.rpm` |
 | Arch | `sablewright-<version>-<build>-x86_64.pkg.tar.zst` |
+| Other Linux | `Sablewright-Linux`, a bare binary |
 
 The `<build>` in the Linux package names is the number of the build that made
-them. It only ever goes up, so a newer download always installs over an older
+them. It goes up with every build, so a newer download installs over an older
 one, including a release over a `latest` build of the same version.
-| Other Linux | `Sablewright-Linux`, a bare binary |
 
 **Windows** — the bare `.exe` runs on Microsoft's WebView2, which Windows 11
 always has and most Windows 10 PCs have picked up through updates. The
@@ -52,9 +52,9 @@ fits — they install to `/usr/bin` and add a menu entry, rather than leaving a
 file to keep track of:
 
 ```
-sudo apt install ./sablewright_2.0.0-*_amd64.deb
-sudo dnf install ./sablewright-2.0.0-*.x86_64.rpm
-sudo pacman -U sablewright-2.0.0-*-x86_64.pkg.tar.zst
+sudo apt install ./sablewright_2.0.0-<build>_amd64.deb
+sudo dnf install ./sablewright-2.0.0-<build>.x86_64.rpm
+sudo pacman -U sablewright-2.0.0-<build>-x86_64.pkg.tar.zst
 ```
 
 All three depend on GTK 4 and WebKitGTK 6.0, which Ubuntu 24.04, Debian 13 and
@@ -333,7 +333,7 @@ put together from `build/darwin` — the binary, `Info.plist` and the icon — a
 ad-hoc signed; `build-mac-or-linux.sh` shows the steps. The disk image is then:
 
 ```
-wails3 tool package --format dmg --name Sablewright --out build/bin
+wails3 tool package --format dmg --name Sablewright --out build/bin --volume-icon build/darwin/icons.icns
 ```
 
 The **Linux** packages come from [nfpm](https://github.com/goreleaser/nfpm),
@@ -342,7 +342,7 @@ covering all three formats, with no root and no containers involved:
 
 ```
 go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
-export VERSION=2.0.0
+export VERSION=2.0.0 RELEASE=1
 nfpm pkg -f build/linux/nfpm.yaml --packager deb       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager rpm       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager archlinux --target build/bin/

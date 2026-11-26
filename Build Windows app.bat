@@ -10,7 +10,7 @@ rem  First run takes a few minutes (it downloads Go packages).
 rem  Later runs take seconds.
 rem ===========================================================
 title Sablewright - build
-setlocal enabledelayedexpansion
+setlocal
 set "HERE=%~dp0"
 if "%HERE:~-1%"=="\" set "HERE=%HERE:~0,-1%"
 cd /d "%HERE%"
@@ -173,7 +173,7 @@ rem     a for /f, where cmd would have to parse its quotes and brackets too.
 set "VERSION="
 set "VERFILE=%TEMP%\sablewright-version.txt"
 del /q "%VERFILE%" >nul 2>&1
-powershell -NoProfile -Command "$in = $false; foreach ($l in Get-Content 'build\config.yml') { if ($l -match '^info:') { $in = $true; continue }; if ($l -match '^\S') { $in = $false }; if ($in -and $l -match '^\s+version:') { ($l -split ':',2)[1].Split('#')[0].Trim().Trim([char]34); break } }" > "%VERFILE%" 2>nul
+powershell -NoProfile -Command "$in = $false; foreach ($l in Get-Content 'build\config.yml') { if ($l -match '^info:') { $in = $true; continue }; if ($l -match '^[^\s#]') { $in = $false }; if ($in -and $l -match '^\s+version:') { ($l -split ':',2)[1].Split('#')[0].Trim().Trim([char]34); break } }" > "%VERFILE%" 2>nul
 if exist "%VERFILE%" set /p VERSION=<"%VERFILE%"
 set "COMMIT="
 for /f "delims=" %%C in ('git rev-parse --short HEAD 2^>nul') do set "COMMIT=%%C"
@@ -187,9 +187,19 @@ rem TEMP so the tracked build\windows\info.json stays as it is.
 set "INFO=%TEMP%\sablewright-info.json"
 set "STAMP=%VERSION%"
 if not defined STAMP set "STAMP=0.0.0"
+del /q "%INFO%" >nul 2>&1
 rem WriteAllText rather than Set-Content: it writes no byte-order mark, which
-rem the JSON reader in the Wails tool would refuse.
-powershell -NoProfile -Command "[IO.File]::WriteAllText('%INFO%', ((Get-Content 'build\windows\info.json' -Raw) -replace '0\.0\.0', '%STAMP%'))"
+rem the JSON reader in the Wails tool would refuse. The path and version are
+rem read from the environment rather than pasted into the command, so a TEMP
+rem folder with an apostrophe in it (C:\Users\O'Brien) can't break it.
+powershell -NoProfile -Command "[IO.File]::WriteAllText($env:INFO, ((Get-Content 'build\windows\info.json' -Raw) -replace '0\.0\.0', $env:STAMP))"
+if errorlevel 1 (
+    echo.
+    echo   [X] Could not prepare the file properties - the error is above.
+    echo.
+    pause
+    exit /b 1
+)
 
 "%GOBIN%\wails3.exe" generate syso -arch amd64 -icon build\windows\icon.ico -manifest build\windows\wails.exe.manifest -info "%INFO%" -out wails_windows_amd64.syso
 if errorlevel 1 (
