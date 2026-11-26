@@ -118,10 +118,12 @@ jobs:
       # rides along because every merge replaces the same rolling release:
       # the number alone cannot tell two downloads apart.
       #
-      # RELEASE numbers the Linux packages of rolling builds, so two builds
-      # of the same version are never two different packages with the same
-      # name and version. A tagged release leaves it empty and gets the
-      # plain version.
+      # RELEASE is the package release number of the Linux packages: this
+      # run's number, on every build. Two builds of one version are then never
+      # two different packages with the same name and version, and since run
+      # numbers only climb, a tagged release - always pushed after the merge
+      # that set its version - sorts above the rolling builds before it,
+      # instead of looking like a downgrade to someone who installed one.
       - name: Work out the build version
         shell: bash
         run: |
@@ -137,10 +139,8 @@ jobs:
               echo "Tag $GITHUB_REF_NAME does not match info.version $V in build/config.yml"
               exit 1
             }
-            echo "RELEASE=" >> "$GITHUB_ENV"
-          else
-            echo "RELEASE=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           fi
+          echo "RELEASE=${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
           echo "VERSION=$V" >> "$GITHUB_ENV"
           echo "LDFLAGS=-w -s -X main.version=$V -X main.commit=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
           echo "Building $V (${GITHUB_SHA:0:7})"
@@ -224,7 +224,9 @@ jobs:
         env:
           CGO_ENABLED: '1'
           MACOSX_DEPLOYMENT_TARGET: '12.0'
-          CGO_CFLAGS: -mmacosx-version-min=12.0
+          # Go's own default CFLAGS are -O2 -g, and setting the variable
+          # replaces them, so they are spelled out alongside the minimum.
+          CGO_CFLAGS: -O2 -g -mmacosx-version-min=12.0
           CGO_LDFLAGS: -mmacosx-version-min=12.0
         run: |
           mkdir -p build/bin
@@ -275,7 +277,8 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           set -euo pipefail
-          wails3 tool package --format dmg --name Sablewright --out build/bin
+          wails3 tool package --format dmg --name Sablewright --out build/bin \
+            --volume-icon build/darwin/icons.icns
           DMG=build/bin/Sablewright.dmg
           [ -f "$DMG" ] || { echo "No DMG in build/bin"; exit 1; }
           ls -lh "$DMG"
@@ -495,10 +498,11 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           REF_NAME: ${{ github.ref_name }}
         run: |
+          # The ref name is handed to jq as data, not pasted into the filter:
+          # a branch name can hold a quote.
           gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" \
-            --jq ".artifacts[]
-                  | select(.workflow_run.id != $RUN_ID and .workflow_run.head_branch == \"$REF_NAME\")
-                  | .id" \
+            | jq -r --arg ref "$REF_NAME" --argjson run "$RUN_ID" \
+                '.artifacts[] | select(.workflow_run.id != $run and .workflow_run.head_branch == $ref) | .id' \
             > stale.txt
           echo "$(wc -l < stale.txt) superseded artifact(s) to remove"
           while read -r id; do
