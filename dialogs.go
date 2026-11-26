@@ -71,13 +71,21 @@ func (a *App) openFile(title string, filters ...fileFilter) (string, error) {
 // is not reported, and macOS ignores the filters entirely, so callers that
 // care about the extension set it themselves (see withExtension).
 func (a *App) saveFile(title, filename string, filters ...fileFilter) (string, error) {
-	d := a.app.Dialog.SaveFile().SetMessage(title).SetFilename(filename)
-	if w := a.attach(); w != nil {
-		d.AttachToWindow(w)
+	// SetOptions rather than the builder methods, because the save dialog's
+	// builder has no title setter and Windows and Linux show only the title.
+	// SetOptions replaces every field, so the filters and window go in too.
+	opts := &application.SaveFileDialogOptions{
+		Title:                title,
+		Message:              title,
+		Filename:             filename,
+		CanCreateDirectories: true,
+		Window:               a.attach(),
 	}
 	for _, f := range filters {
-		d.AddFilter(f.name, f.pattern)
+		opts.Filters = append(opts.Filters, application.FileFilter{DisplayName: f.name, Pattern: f.pattern})
 	}
+	d := a.app.Dialog.SaveFile()
+	d.SetOptions(opts)
 	path, err := d.PromptForSingleSelection()
 	if dialogCancelled(err) {
 		return "", nil
@@ -89,10 +97,11 @@ func (a *App) saveFile(title, filename string, filters ...fileFilter) (string, e
 // and reports whether the action was chosen. It is how deletes and other
 // things that can't be undone are checked.
 //
-// Cancel is both the default button and the cancel button, so Enter, Escape
-// and closing the dialog all mean no. Setting a cancel button also matters
-// for a second reason: on Linux, closing a dialog that has none answers
-// nothing at all, and this would wait for ever.
+// Cancel is both the default button and the cancel button, so Enter means no
+// everywhere, and so does Escape or closing the dialog wherever the platform
+// offers them. Setting a cancel button also matters for a second reason: on
+// Linux, closing a dialog that has none answers nothing at all, and this would
+// wait for ever.
 func (a *App) Confirm(title, message, okLabel string) (bool, error) {
 	if okLabel == "" {
 		okLabel = "OK"
@@ -113,7 +122,7 @@ func (a *App) Confirm(title, message, okLabel string) (bool, error) {
 		d.AttachToWindow(w)
 	}
 	d.AddButton(okLabel).OnClick(reply(true))
-	d.AddButton("Cancel").OnClick(reply(false)).SetAsDefault().SetAsCancel()
+	d.AddButton(confirmCancelLabel()).OnClick(reply(false)).SetAsDefault().SetAsCancel()
 	// Show returns at once on macOS and Linux and only once answered on
 	// Windows; the channel waits the same way on all three.
 	d.Show()
