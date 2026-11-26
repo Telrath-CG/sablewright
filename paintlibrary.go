@@ -87,7 +87,8 @@ var (
 )
 
 // PaintLibrary returns the built-in paints. The slice is shared, so callers
-// must copy anything they intend to modify - which SeedPaints does by value.
+// must copy anything they intend to modify - which addLibraryPaints does, by
+// ranging over it by value.
 func PaintLibrary() []Paint {
 	libraryOnce.Do(func() {
 		// The file ships inside the binary and is checked by a test, so a

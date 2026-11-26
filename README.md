@@ -68,6 +68,20 @@ missing library surfaces as a linker error rather than a readable message —
 prefer a package wherever one fits. It also arrives without the executable
 bit: `chmod +x Sablewright-Linux`.
 
+### Upgrading from 1.x
+
+- **Your collection comes with you.** It stays in the same data folder, and
+  2.0 opens it as it is.
+- **Quit 1.x before starting 2.0.** Each allows only one copy of itself, but
+  the two don't recognise each other, and a 1.x left open would keep saving
+  over 2.0's changes.
+- **On Windows**, the installer replaces 1.x in place.
+- **On Linux**, 2.0 needs Ubuntu 24.04, Debian 13 or newer. Stay on 1.2.x on
+  older releases.
+- **The light/dark choice** may reset once, since the window's storage moved.
+- **Going back** to 1.2.x works, but photos deleted in 2.0 and still in its
+  trash can no longer be put back.
+
 ---
 
 ## Using it
