@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func projectNames(ps []Project) []string {
 	out := make([]string, len(ps))
@@ -148,5 +151,113 @@ func TestSaveProjectDropsAnEmptyRecord(t *testing.T) {
 
 	if len(s.data.Projects) != 0 {
 		t.Errorf("stored %+v, want the emptied record dropped", s.data.Projects)
+	}
+}
+
+// Renaming onto a project that already exists folds the two together. Its
+// details have to merge into the one row: two rows under a name means only
+// one of them is ever read, and the other's notes are lost without a word.
+func TestRenameProjectOntoAnExistingProjectMergesItsDetails(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100,
+		Projects: []ProjectMeta{
+			{Name: "Cadia Push", Due: "2026-08-15", Notes: "Paint the tanks first."},
+			{Name: "Cadian Push", Notes: "Basing kit is in the drawer."},
+		},
+		Models: []Model{
+			{ID: 1, Name: "A", Project: "Cadia Push", Status: "Backlog", Count: 1},
+			{ID: 2, Name: "B", Project: "Cadian Push", Status: "Backlog", Count: 1},
+		}}
+
+	if _, err := s.RenameProject("Cadia Push", "Cadian Push"); err != nil {
+		t.Fatalf("RenameProject(): %v", err)
+	}
+
+	if len(s.data.Projects) != 1 {
+		t.Fatalf("stored %+v, want one merged record", s.data.Projects)
+	}
+	got := s.data.Projects[0]
+	if got.Name != "Cadian Push" {
+		t.Errorf("name = %q, want the project renamed onto", got.Name)
+	}
+	if got.Due != "2026-08-15" {
+		t.Errorf("due = %q, want the deadline carried over from the renamed project", got.Due)
+	}
+	if !strings.Contains(got.Notes, "Basing kit") || !strings.Contains(got.Notes, "tanks first") {
+		t.Errorf("notes = %q, want both projects' notes kept", got.Notes)
+	}
+}
+
+// The project being renamed onto keeps its own deadline.
+func TestMergeProjectMetaKeepsTheTargetsDeadline(t *testing.T) {
+	got := mergeProjectMeta(
+		ProjectMeta{Name: "Kept", Due: "2026-09-01", Notes: "same"},
+		ProjectMeta{Name: "Gone", Due: "2026-08-01", Notes: "same"})
+	if got.Due != "2026-09-01" {
+		t.Errorf("due = %q, want the target's own 2026-09-01", got.Due)
+	}
+	if got.Notes != "same" {
+		t.Errorf("notes = %q, want identical notes kept once", got.Notes)
+	}
+}
+
+// Files written before renames merged can hold two records under one name.
+// Renaming that name has to carry both across, not keep the last and drop
+// the other's notes and deadline.
+func TestRenameProjectCarriesEveryRecordUnderTheOldName(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100, Projects: []ProjectMeta{
+		{Name: "B", Due: "2026-08-15"},
+		{Name: "B", Notes: "Second record's notes."},
+	}}
+	if _, err := s.RenameProject("B", "C"); err != nil {
+		t.Fatalf("RenameProject(): %v", err)
+	}
+	if len(s.data.Projects) != 1 {
+		t.Fatalf("stored %+v, want one record", s.data.Projects)
+	}
+	got := s.data.Projects[0]
+	if got.Name != "C" || got.Due != "2026-08-15" || got.Notes != "Second record's notes." {
+		t.Errorf("got %+v, want both records' details under C", got)
+	}
+}
+
+// The upgrade folds duplicate records left by the old rename into one, so
+// an edit to the project lands on the record that is read. The last record
+// wins where they disagree: it is the one the Projects screen was showing.
+func TestMigrateMergesDuplicateProjectRecords(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{Version: 5, NextID: 100, Projects: []ProjectMeta{
+		{Name: "B", Due: "2026-01-01", Notes: "first"},
+		{Name: "A", Due: "2026-09-01"},
+		{Name: "B", Due: "2026-12-31", Notes: "second"},
+	}}
+	shown := s.Projects(day("2026-08-08"))
+	s.migrate()
+	if len(s.data.Projects) != 2 {
+		t.Fatalf("stored %+v, want A and one B", s.data.Projects)
+	}
+	b := s.data.Projects[0]
+	if b.Name != "B" || b.Due != "2026-12-31" || b.Notes != "second\n\nfirst" {
+		t.Errorf("merged B = %+v, want the shown deadline and both notes", b)
+	}
+	after := s.Projects(day("2026-08-08"))
+	for i := range shown {
+		if shown[i].Name == "B" && shown[i].Due != after[i].Due {
+			t.Errorf("B's deadline shown as %s before the upgrade and %s after", shown[i].Due, after[i].Due)
+		}
+	}
+}
+
+// Notes that are an edit of the other record's - the same text and more -
+// are kept once, not twice.
+func TestMergeProjectMetaKeepsAnEditedNoteOnce(t *testing.T) {
+	got := mergeProjectMeta(ProjectMeta{Notes: "Base the squad"}, ProjectMeta{Notes: "Base the squad, then varnish"})
+	if got.Notes != "Base the squad, then varnish" {
+		t.Errorf("notes = %q, want the fuller note once", got.Notes)
+	}
+	got = mergeProjectMeta(ProjectMeta{Notes: "Base the squad, then varnish"}, ProjectMeta{Notes: "Base the squad"})
+	if got.Notes != "Base the squad, then varnish" {
+		t.Errorf("notes = %q, want the fuller note once", got.Notes)
 	}
 }

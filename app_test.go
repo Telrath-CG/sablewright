@@ -64,3 +64,14 @@ func TestFacetsDropsABrandThatNoLongerExists(t *testing.T) {
 		t.Error("a dropped brand should fall back to every range, not none")
 	}
 }
+
+// The file name comes from the page, and the system opener runs scripts as
+// readily as it shows pictures, so only image files are handed to it.
+func TestOpenPhotoRefusesAnythingButAnImage(t *testing.T) {
+	a := &App{store: newTempStore(t)}
+	for _, name := range []string{"run.bat", "launch.command", "x.sh", "notes.txt", "photo.jpg.exe", ""} {
+		if err := a.OpenPhoto(name); err == nil {
+			t.Errorf("OpenPhoto(%q) went ahead, want it refused", name)
+		}
+	}
+}

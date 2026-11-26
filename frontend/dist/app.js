@@ -116,7 +116,9 @@ function esc(s) {
 function prettyDate(iso) {
   if (!iso) return "—";
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return iso;
+  // Callers drop the result straight into HTML, and a date that isn't one
+  // came from a file - possibly a backup someone else made.
+  if (!m) return esc(iso);
   const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
                   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   return `${+m[3]} ${months[+m[2] - 1]} ${m[1]}`;
@@ -1921,7 +1923,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   // The build names itself rather than carrying a string the source has to
   // remember to update - the linker stamps it in, so it can't go stale.
   App().Version().then(v => { $("#version").textContent = v; });
+  // A collection that had to be set aside is too much to say in a toast
+  // that's gone in three seconds, so it gets a dialog that waits to be read.
   const warn = await App().StartupError();
-  if (warn) toast(warn);
+  if (warn) App().Info("Your collection was set aside", warn);
   show("dashboard");
 });

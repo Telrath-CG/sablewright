@@ -124,7 +124,11 @@ func safeFilename(name string) string {
 // returns it as a data URI. A photo that will not decode is skipped rather
 // than breaking the export.
 func (a *App) exportPhoto(file string) string {
-	img, turn, err := decodeImage(filepath.Join(a.store.PhotoDir(), file))
+	src, ok := a.store.photoPath(file)
+	if !ok {
+		return ""
+	}
+	img, turn, err := decodeImage(src)
 	if err != nil {
 		return ""
 	}
@@ -300,7 +304,12 @@ func (a *App) exportMarkdown(m Model, paints []Paint, path string) error {
 		}
 		b.WriteString("\n## Photos\n\n")
 		for _, p := range shots {
-			src := filepath.Join(a.store.PhotoDir(), p.File)
+			// The name becomes a path twice here, once to read and once to
+			// write beside the export, so it has to be a plain file name.
+			src, ok := a.store.photoPath(p.File)
+			if !ok {
+				continue
+			}
 			raw, err := os.ReadFile(src)
 			if err != nil {
 				continue

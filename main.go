@@ -70,7 +70,7 @@ func (h photoHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func main() {
 	app := NewApp()
 
-	store, err := NewStore()
+	store, warning, err := NewStore()
 	if err != nil {
 		// A store that won't open is fatal, but the message must reach the
 		// user - with no console attached, printing alone would vanish.
@@ -78,6 +78,7 @@ func main() {
 		return
 	}
 	app.store = store
+	app.loadErr = warning
 
 	err = wails.Run(&options.App{
 		Title:     "Sablewright",
@@ -92,6 +93,10 @@ func main() {
 		BackgroundColour: &options.RGBA{R: 238, G: 241, B: 245, A: 1},
 		OnStartup:        app.startup,
 		Bind:             []interface{}{app},
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId:               "net.dynamicsyntax.sablewright",
+			OnSecondInstanceLaunch: app.onSecondInstance,
+		},
 		Windows: &windows.Options{
 			WebviewIsTransparent: false,
 			WindowIsTranslucent:  false,
