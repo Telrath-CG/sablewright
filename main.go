@@ -102,7 +102,10 @@ func main() {
 	}
 
 	wails := application.New(application.Options{
-		Name:        "Sablewright",
+		Name: "Sablewright",
+		// Quitting with a painting timer going asks first: the timer is
+		// held only in memory, and its time would be lost.
+		ShouldQuit:  app.mayQuit,
 		Description: "Track your miniature painting projects.",
 		Icon:        icon,
 		Services:    []application.Service{application.NewService(app)},
@@ -144,30 +147,50 @@ func main() {
 	app.app = wails
 
 	// macOS gets the menus every Mac app has - the app menu, Edit for copy
-	// and paste in text fields, and Window. Left to itself Wails adds File,
-	// View and Help as well, whose Help item replaces this window with the
-	// Wails website and whose View items reload the page, losing a running
-	// timer.
+	// and paste in text fields, and Window - plus File and View with
+	// Sablewright's own commands. Left to itself Wails adds a View menu that
+	// reloads the page, losing a running timer, and a Help item that replaces
+	// this window with the Wails website. Windows and Linux keep their
+	// windows as they are, with the same shortcuts as key bindings.
+	var keys map[string]func(application.Window)
 	if runtime.GOOS == "darwin" {
-		menu := application.NewMenu()
-		menu.AddRole(application.AppMenu)
-		menu.AddRole(application.EditMenu)
-		menu.AddRole(application.WindowMenu)
-		wails.Menu.Set(menu)
+		wails.Menu.Set(app.appMenu())
+	} else {
+		keys = app.keyBindings()
+	}
+	app.contextMenus()
+
+	// Opens at the size it was last left at; rememberWindow moves it back to
+	// where it was once the screens are known.
+	width, height := 1180, 760
+	if saved, ok := loadWindowState(DataDir()); ok {
+		width, height = saved.Width, saved.Height
 	}
 
 	// Nothing is drawn until Run, by which time the store is in place.
 	win := wails.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "Sablewright",
-		Width:            1180,
-		Height:           760,
-		MinWidth:         940,
-		MinHeight:        600,
+		Width:            width,
+		Height:           height,
+		MinWidth:         minWidth,
+		MinHeight:        minHeight,
 		BackgroundColour: application.NewRGB(238, 241, 245),
+		KeyBindings:      keys,
+		// Pictures dropped on a mini's photos are added to it. Only the
+		// elements marked data-file-drop-target take a drop.
+		EnableFileDrop: true,
 	})
 	win.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
 		app.pageReady.Store(true)
 	})
+	win.OnWindowEvent(events.Common.WindowFilesDropped, app.onFilesDropped)
+	// Closing the window with a timer going asks first, as quitting does.
+	win.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
+		if !app.mayQuit() {
+			e.Cancel()
+		}
+	})
+	rememberWindow(wails, win, DataDir())
 	app.win.Store(win)
 
 	store, warning, err := NewStore()
