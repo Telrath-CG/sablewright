@@ -72,15 +72,18 @@ bit: `chmod +x Sablewright-Linux`.
 
 - **Your collection comes with you.** It stays in the same data folder, and
   2.0 opens it as it is.
-- **Quit 1.x before starting 2.0.** Each allows only one copy of itself, but
-  the two don't recognise each other, and a 1.x left open would keep saving
-  over 2.0's changes.
-- **On Windows**, the installer replaces 1.x in place.
+- **Quit 1.x before starting 2.0.** 1.x doesn't stop a second copy from
+  running, and 2.0 can't see a 1.x that is still open, so one left open would
+  keep saving over 2.0's changes.
+- **On Windows**, if you installed 1.x with its installer, the 2.0 installer
+  replaces it in place. A 1.x `.exe` kept somewhere else is simply left where
+  it is.
 - **On Linux**, 2.0 needs Ubuntu 24.04, Debian 13 or newer. Stay on 1.2.x on
   older releases.
 - **The light/dark choice** may reset once, since the window's storage moved.
-- **Going back** to 1.2.x works, but photos deleted in 2.0 and still in its
-  trash can no longer be put back.
+- **Going back** to 1.2.x works, but 1.x doesn't know about the trash for
+  deleted photos: it drops those entries the next time it saves, after which
+  photos deleted in 2.0 can't be put back.
 
 ---
 
