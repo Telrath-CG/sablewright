@@ -225,6 +225,7 @@ func (s *Store) RestoreFrom(src, stamp string) error {
 
 	previous := s.data
 	s.data = *restored
+	s.gen++
 	if s.data.Version < dataVersion {
 		s.migrate()
 		s.data.Version = dataVersion

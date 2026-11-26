@@ -145,14 +145,21 @@ function intOf(value, fallback) {
 }
 
 // Minutes as people write them, including the way the app itself shows them:
-// "90", "1h 30m", "1h30", "1h", "45m", "45 min", "1:30", "1.5h".
+// "90", "1h 30m", "1h30", "1h", "45m", "45 min", "1:30", "1.5h". Blank is no
+// time. Anything else is null - "1.5", "30s", "1h and a bit" - so the form can
+// say it didn't understand rather than log a guess.
 function minutesOf(value) {
   const s = String(value == null ? "" : value).trim().toLowerCase();
-  let m = /^(\d+):([0-5]?\d)$/.exec(s);
-  if (m) return +m[1] * 60 + +m[2];
-  m = /^(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*(?:m(?:ins?|inutes?)?)?)?$/.exec(s);
-  if (m && (m[1] || m[2])) return Math.round((+m[1] || 0) * 60) + (+m[2] || 0);
-  return intOf(s, 0);
+  if (!s) return 0;
+  let mins = null;
+  let m = /^(\d+):([0-5]\d)$/.exec(s);
+  if (m) mins = +m[1] * 60 + +m[2];
+  else if ((m = /^(?:(\d+(?:\.\d+)?)\s*h(?:ours?|rs?)?)?\s*(?:(\d+)\s*(?:m(?:ins?|inutes?)?)?)?$/.exec(s)) &&
+           (m[1] || m[2]) && !(m[1] === undefined && /\./.test(s))) {
+    mins = Math.round((+m[1] || 0) * 60) + (+m[2] || 0);
+  }
+  // A week at the desk in one sitting is a typo, not a session.
+  return mins !== null && Number.isFinite(mins) && mins <= 7 * 24 * 60 ? mins : null;
 }
 
 // A squad is one row, so the row has to show how far through it is. Nothing
@@ -221,6 +228,10 @@ let toastTimer = null;
 function toast(msg, action) {
   const t = $("#toast");
   t.textContent = msg;
+  // The toast itself is hidden between messages, and text that changes in
+  // a hidden element isn't reliably read out, so it is announced separately.
+  const say = $("#announce");
+  if (say) say.textContent = msg;
   if (action) {
     const btn = document.createElement("button");
     btn.className = "undo";
@@ -248,19 +259,24 @@ async function call(fn, ...args) {
 // A save button must not save twice. A double-click, or a second click while
 // a slow save was still on its way, made two minis, two log entries or two
 // paints. guard() wraps a click handler so a second press does nothing until
-// the first has finished, and greys the button out meanwhile.
-function guard(fn) {
-  let pending = false;
+// the first has finished, and greys the button out meanwhile. Handlers that
+// share a lock also wait for each other: in one dialog, Add entry then Save
+// must not both write the same entry.
+function guard(fn, lock = { pending: false }) {
   return async function (e) {
-    if (pending) return;
-    pending = true;
+    if (lock.pending) return;
+    lock.pending = true;
     const btn = e && e.currentTarget instanceof HTMLButtonElement ? e.currentTarget : null;
     if (btn) btn.disabled = true;
     try {
       return await fn.apply(this, arguments);
     } finally {
-      pending = false;
-      if (btn) btn.disabled = false;
+      lock.pending = false;
+      if (btn) {
+        btn.disabled = false;
+        // Disabling the button dropped the keyboard focus to the page.
+        if (btn.isConnected && document.activeElement === document.body) btn.focus();
+      }
     }
   };
 }
@@ -298,7 +314,8 @@ function onColor(hex) {
   const v = parseInt(m[1], 16);
   const lin = c => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
   const L = 0.2126 * lin(v >> 16) + 0.7152 * lin((v >> 8) & 255) + 0.0722 * lin(v & 255);
-  return L > 0.3 ? "#1f2933" : "#fff";
+  // 0.22 is where white and the dark text are equally readable against it.
+  return L > 0.22 ? "#1f2933" : "#fff";
 }
 
 function badge(status) {
@@ -498,7 +515,11 @@ async function stopTimer() {
 function initNav() {
   $("#nav").addEventListener("click", e => {
     const li = e.target.closest("li");
-    if (li) show(li.dataset.screen);
+    if (!li) return;
+    show(li.dataset.screen);
+    // A mouse click shouldn't leave the keyboard parked on the sidebar,
+    // where Enter would mean the sidebar item rather than the list.
+    if (e.detail) li.blur();
   });
   // The items are list entries rather than buttons, so they say they act like
   // one and answer the keys a button would.
@@ -535,9 +556,11 @@ function initKeys() {
     if (!$("#modal-backdrop").hidden) return; // the dialog owns the keyboard
     // Only while nothing else has the keyboard: typing in the search box
     // means arrows move the caret, and Enter on a focused button - Add Mini,
-    // Export, the sidebar's Stop, a toast's Undo - is that button's.
+    // Export, the sidebar's Stop, a toast's Undo - is that button's. A key
+    // something else has already handled is left alone.
+    if (e.defaultPrevented) return;
     const el = document.activeElement;
-    if (el && el !== document.body && !el.closest("#m-rows")) return;
+    if (el && el !== document.body && !el.closest("#m-rows, #nav")) return;
 
     const step = { ArrowDown: 1, ArrowUp: -1 }[e.key];
     if (!step && e.key !== "Enter") return;
@@ -746,7 +769,7 @@ async function renderModels() {
       <div class="card list-pane">
         <div class="list-head" id="m-head">${head}</div>
         <div class="divider"></div>
-        <div class="rows" id="m-rows">${rows}</div>
+        <div class="rows" id="m-rows" tabindex="0" aria-label="Minis - arrow keys move, Enter opens">${rows}</div>
       </div>
       <div class="card detail-pane" id="m-detail"></div>
     </div>`);
@@ -1296,8 +1319,11 @@ async function renderWishlist() {
 
   const all = $("#w-all");
   if (all) all.onclick = guard(async () => {
-    for (const p of page.missing) await call(App().SetPaintFlags, p.id, false, true);
-    paintsChanged();
+    try {
+      for (const p of page.missing) await call(App().SetPaintFlags, p.id, false, true);
+    } finally {
+      paintsChanged();
+    }
     toast(`Added ${plural(page.missing.length, "paint")}`);
     renderWishlist();
   });
@@ -1441,13 +1467,23 @@ let closeGuard = null;
 let closing = false;
 // The mini dialog currently open, if any (see modelDialog).
 let openDialog = null;
+// Run once when the dialog closes, however it closes.
+let closeHook = null;
 // Where the keyboard was before the dialog opened, so it can go back there.
 let focusBeforeModal = null;
 
-function openModal(html, cls = "") {
+// owner says which dialog is drawing. A different one taking over the modal
+// - opened while another was still loading - drops the previous one's close
+// question and close hook, which belong to a dialog no longer there.
+function openModal(html, cls = "", owner = null) {
   const modal = $("#modal");
   const backdrop = $("#modal-backdrop");
   if (backdrop.hidden) focusBeforeModal = document.activeElement;
+  if (owner === null || owner !== openDialog) {
+    closeGuard = null;
+    closeHook = null;
+    openDialog = owner;
+  }
   // A modal re-renders in place - a tab switch, or the paint picker filtering
   // as you type - so the caret needs the same treatment the screens get.
   const snap = captureFocus(modal);
@@ -1465,7 +1501,9 @@ function openModal(html, cls = "") {
   document.addEventListener("keydown", escClose);
 }
 function closeModal() {
+  const hook = closeHook;
   closeGuard = null;
+  closeHook = null;
   openDialog = null;
   $("#modal-backdrop").hidden = true;
   $("#modal").innerHTML = "";
@@ -1477,6 +1515,7 @@ function closeModal() {
   // Escape don't redraw anything on their way out, so the pane behind would
   // otherwise be left showing the state from before the dialog opened.
   syncDetailTimer();
+  if (hook) hook();
 }
 // Cancel, Escape and ✕: close, unless the dialog has something unsaved and
 // the answer to its question is no.
@@ -1554,8 +1593,13 @@ async function modelDialog(model, opts = {}) {
   // Which dialog this is, so an Undo clicked after it closed knows not to
   // draw into whatever is open by then.
   const me = Symbol("mini dialog");
-  openDialog = me;
   const isOpen = () => openDialog === me && !$("#modal-backdrop").hidden;
+  // One lock for every button that writes, so two of them can't save the
+  // same thing at once.
+  const busy = { pending: false };
+  // Photos, the cover and log entries save the moment they change, so the
+  // list behind can be out of date even when the dialog is cancelled.
+  let dirty = false;
 
   function render() {
     const chosen = new Set(m.paintIds || []);
@@ -1707,13 +1751,15 @@ async function modelDialog(model, opts = {}) {
         <div class="spacer"></div>
         <button class="btn ghost" id="cancel">Cancel</button>
         <button class="btn" id="save">Save</button>
-      </footer>`);
+      </footer>`, "", me);
+    if (!closeGuard) closeGuard = askBeforeClosing;
+    if (!closeHook) closeHook = () => { if (dirty) show(state.screen); };
 
     $("#modal").querySelectorAll(".tabs button").forEach(b => {
       b.onclick = () => { collect(); tab = b.dataset.tab; render(); };
     });
     $("#cancel").onclick = requestClose;
-    $("#save").onclick = guard(save);
+    $("#save").onclick = guard(save, busy);
     const del = $("#del");
     if (del) del.onclick = guard(async () => {
       const ok = await call(App().Confirm, "Delete mini",
@@ -1724,6 +1770,7 @@ async function modelDialog(model, opts = {}) {
       await call(App().DeleteModel, gone);
       // Nothing left to log the session against.
       if (timer.modelId === gone) clearTimer();
+      dirty = false;
       closeModal(); state.models.selected = null; show(state.screen);
       toast(`Deleted “${name}”`, { label: "Undo", run: async () => {
         await call(App().UndoDeleteModel, gone);
@@ -1731,13 +1778,14 @@ async function modelDialog(model, opts = {}) {
         show(state.screen);
         toast("Put back");
       } });
-    });
+    }, busy);
 
     // A tab switch leaves focus on the tab button, so drop the caret somewhere
     // useful. A re-render mid-typing has already put it back, and that wins.
     if (!$("#modal").contains(document.activeElement)) {
       const first = tab === "details" ? $("#f-name")
-                  : tab === "paints" ? $("#f-psearch") : null;
+                  : tab === "paints" ? $("#f-psearch")
+                  : tab === "log" ? $("#s-notes") : null;
       if (first) first.focus();
     }
 
@@ -1766,7 +1814,7 @@ async function modelDialog(model, opts = {}) {
         if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
       };
 
-      $("#s-add").onclick = guard(addSession);
+      $("#s-add").onclick = guard(addSession, busy);
       const ce = $("#s-cancel-edit");
       if (ce) ce.onclick = () => { editSession = {}; render(); };
       $("#modal").querySelectorAll(".s-edit").forEach(a => {
@@ -1784,6 +1832,7 @@ async function modelDialog(model, opts = {}) {
           collect();
           const updated = await call(App().DeleteSession, m.id, sid);
           if (!updated) return;
+          dirty = true;
           m.sessions = updated.sessions || [];
           if (editSession.id === sid) editSession = {};
           render();
@@ -1794,19 +1843,20 @@ async function modelDialog(model, opts = {}) {
               { id: 0, date: gone.date, minutes: gone.minutes, notes: gone.notes });
             if (back) afterUndo(back);
           } });
-        });
+        }, busy);
       });
     }
 
     if (tab === "photos") {
-      $("#add-product").onclick = guard(() => addPhotos("Product"));
-      $("#add-prog").onclick = guard(() => addPhotos("Progress"));
-      $("#add-final").onclick = guard(() => addPhotos("Final"));
+      $("#add-product").onclick = guard(() => addPhotos("Product"), busy);
+      $("#add-prog").onclick = guard(() => addPhotos("Progress"), busy);
+      $("#add-final").onclick = guard(() => addPhotos("Final"), busy);
       $("#modal").querySelectorAll(".photo .x").forEach(x => {
         x.onclick = guard(async () => {
           const pid = +x.dataset.photo;
           const updated = await call(App().DeletePhoto, m.id, pid);
           if (!updated) return;
+          dirty = true;
           m.photos = updated.photos || [];
           render();
           // The delete is a click away from the cover star, and a photo of a
@@ -1815,13 +1865,13 @@ async function modelDialog(model, opts = {}) {
             const back = await call(App().UndoDeletePhoto, m.id, pid);
             if (back) afterUndo(back);
           } });
-        });
+        }, busy);
       });
       $("#modal").querySelectorAll(".photo .pick").forEach(s => {
         s.onclick = guard(async () => {
           const updated = await call(App().SetCoverPhoto, m.id, +s.dataset.cover);
-          if (updated) { m.photos = updated.photos || []; render(); }
-        });
+          if (updated) { dirty = true; m.photos = updated.photos || []; render(); }
+        }, busy);
       });
     }
   }
@@ -1864,7 +1914,7 @@ async function modelDialog(model, opts = {}) {
   async function addPhotos(kind) {
     if (!m.id && !(await ensureSaved())) return;
     const updated = await call(App().AddPhotos, m.id, kind);
-    if (updated) { m.photos = updated.photos || []; render(); }
+    if (updated) { dirty = true; m.photos = updated.photos || []; render(); }
   }
 
   // Whether the log form holds something that would be lost: a new entry
@@ -1872,8 +1922,10 @@ async function modelDialog(model, opts = {}) {
   // entry changed since it was opened for editing.
   function draftChanged() {
     const notes = (editSession.notes || "").trim();
-    const mins = minutesOf(editSession.minutes);
-    if (!editSession.id) return !!(notes || mins);
+    const typed = String(editSession.minutes == null ? "" : editSession.minutes).trim();
+    const mins = minutesOf(typed);
+    if (!editSession.id) return !!(notes || typed);
+    if (mins === null) return true;
     const was = (m.sessions || []).find(x => x.id === editSession.id) || {};
     return notes !== (was.notes || "").trim() || mins !== (was.minutes || 0) ||
       (editSession.date || "") !== (was.date || "");
@@ -1881,27 +1933,33 @@ async function modelDialog(model, opts = {}) {
 
   function confirmDiscard() {
     const mins = minutesOf(editSession.minutes);
-    return call(App().Confirm, "Unsaved log entry",
-      (mins ? `This log entry and its ${duration(mins)} haven't been saved.`
-            : "This log entry hasn't been saved.") + "\n\nThrow it away?",
-      "Discard");
+    const what = editSession.id ? "Your changes to this log entry haven't been saved."
+      : mins ? `This log entry and its ${duration(mins)} haven't been saved.`
+      : "This log entry hasn't been saved.";
+    return call(App().Confirm, "Unsaved log entry", what + "\n\nThrow it away?", "Discard");
   }
 
   // Closing with the log form half filled in - most often straight after
   // stopping the timer - asks first rather than losing the time.
-  closeGuard = async () => {
+  async function askBeforeClosing() {
     collect();
     return !draftChanged() || await confirmDiscard();
-  };
+  }
+
+  // The store keeps Started no later than the earliest log entry, and a
+  // Started typed on the Details tab and not yet saved is the user's: the
+  // earlier of the two stands.
+  const earlier = (a, b) => !a ? b : !b ? a : (a < b ? a : b);
 
   // An Undo arrives after its toast, by which time this dialog may be closed;
   // it then refreshes the screen behind instead of reopening it.
   function afterUndo(updated) {
     if (isOpen()) {
       collect();
+      dirty = true;
       m.photos = updated.photos || [];
       m.sessions = updated.sessions || [];
-      m.started = updated.started;
+      m.started = earlier(m.started, updated.started);
       render();
     } else {
       show(state.screen);
@@ -1914,19 +1972,26 @@ async function modelDialog(model, opts = {}) {
     const notes = (editSession.notes || "").trim();
     if (!notes) {
       if (tab !== "log") { tab = "log"; render(); }
-      toast("Write a line about what you did this session");
+      toast("Write a line about this session to log its time, or clear the time to save without it");
+      return false;
+    }
+    const minutes = minutesOf(editSession.minutes);
+    if (minutes === null) {
+      if (tab !== "log") { tab = "log"; render(); }
+      toast("That time didn't make sense — write it like 90, 1h 30m or 1:30");
       return false;
     }
     if (!m.id && !(await ensureSaved())) return false;
     const updated = await call(App().SaveSession, m.id, {
       id: editSession.id || 0,
       date: editSession.date || todayISO(),
-      minutes: minutesOf(editSession.minutes),
+      minutes,
       notes,
     });
     if (!updated) return false;
+    dirty = true;
     m.sessions = updated.sessions || [];
-    m.started = updated.started;
+    m.started = earlier(m.started, updated.started);
     editSession = {};
     render();
     toast("Session logged");
@@ -1939,6 +2004,7 @@ async function modelDialog(model, opts = {}) {
     collect();
     if (draftChanged() && !(await addSession())) return;
     if (!(await ensureSaved())) return;
+    dirty = false; // redrawn just below, with the selection moved to this mini
     closeModal();
     state.models.selected = m.id;
     // Redraw whichever screen is actually up, not the models list. Stopping
