@@ -230,7 +230,9 @@ function toast(msg, action) {
   t.textContent = msg;
   // The toast itself is hidden between messages, and text that changes in
   // a hidden element isn't reliably read out, so it is announced separately.
-  const say = $("#announce");
+  // While a dialog is open the rest of the page is hidden from a screen
+  // reader, so the dialog carries its own region for this.
+  const say = (!$("#modal-backdrop").hidden && $("#modal-announce")) || $("#announce");
   if (say) say.textContent = msg;
   if (action) {
     const btn = document.createElement("button");
@@ -262,16 +264,26 @@ async function call(fn, ...args) {
 // the first has finished, and greys the button out meanwhile. Handlers that
 // share a lock also wait for each other: in one dialog, Add entry then Save
 // must not both write the same entry.
-function guard(fn, lock = { pending: false }) {
+function guard(fn, lock = { current: null }) {
+  let running = false;
   return async function (e) {
-    if (lock.pending) return;
-    lock.pending = true;
+    if (running) return; // the same button again: a double press
+    running = true;
     const btn = e && e.currentTarget instanceof HTMLButtonElement ? e.currentTarget : null;
     if (btn) btn.disabled = true;
     try {
-      return await fn.apply(this, arguments);
+      // Another button's write goes first, then this one - pressing Save
+      // while Add entry is still saving still saves.
+      while (lock.current) await lock.current.catch(() => {});
+      const work = Promise.resolve(fn.apply(this, arguments));
+      lock.current = work;
+      try {
+        return await work;
+      } finally {
+        if (lock.current === work) lock.current = null;
+      }
     } finally {
-      lock.pending = false;
+      running = false;
       if (btn) {
         btn.disabled = false;
         // Disabling the button dropped the keyboard focus to the page.
@@ -575,12 +587,24 @@ function initKeys() {
     // jumping to whichever end the arrow happens to point away from.
     const next = rows[at < 0 ? 0 : Math.min(rows.length - 1, Math.max(0, at + step))];
     state.models.selected = +next.dataset.id;
-    rows.forEach(r => r.classList.toggle("sel", r === next));
+    markSelected(next);
     next.scrollIntoView({ block: "nearest" });
     // Only the pane is redrawn: rebuilding the list would throw away the
     // rows this is walking, and held arrows would fight the round trip.
     renderModelDetail(state.models.selected);
   });
+}
+
+// Moves the highlight in the models list, for the eye and for a screen
+// reader, without redrawing it.
+function markSelected(row) {
+  const list = $("#m-rows");
+  if (!list) return;
+  list.querySelectorAll(".row").forEach(r => {
+    r.classList.toggle("sel", r === row);
+    r.setAttribute("aria-selected", String(r === row));
+  });
+  list.setAttribute("aria-activedescendant", row.id);
 }
 
 function show(screen) {
@@ -710,7 +734,8 @@ async function renderModels() {
   const rows = models.length ? models.map(m => {
     const cover = coverPhoto(m);
     return `
-    <div class="row${m.id === f.selected ? " sel" : ""}" data-id="${m.id}">
+    <div class="row${m.id === f.selected ? " sel" : ""}" data-id="${m.id}" id="mini-row-${m.id}"
+      role="option" aria-selected="${m.id === f.selected}">
       <div class="who">
         ${cover ? `<img class="cover" src="${photoSrc(cover)}" alt="" loading="lazy">`
                 : `<span class="cover blank">▤</span>`}
@@ -769,7 +794,9 @@ async function renderModels() {
       <div class="card list-pane">
         <div class="list-head" id="m-head">${head}</div>
         <div class="divider"></div>
-        <div class="rows" id="m-rows" tabindex="0" aria-label="Minis - arrow keys move, Enter opens">${rows}</div>
+        <div class="rows" id="m-rows" tabindex="0" role="listbox"
+          aria-label="Minis - arrow keys move, Enter opens"${
+            f.selected ? ` aria-activedescendant="mini-row-${f.selected}"` : ""}>${rows}</div>
       </div>
       <div class="card detail-pane" id="m-detail"></div>
     </div>`);
@@ -804,7 +831,7 @@ async function renderModels() {
     const row = e.target.closest(".row");
     if (!row) return;
     f.selected = +row.dataset.id;
-    content().querySelectorAll("#m-rows .row").forEach(r => r.classList.toggle("sel", r === row));
+    markSelected(row);
     renderModelDetail(f.selected);
   });
   $("#m-rows").addEventListener("dblclick", e => {
@@ -1488,7 +1515,8 @@ function openModal(html, cls = "", owner = null) {
   // as you type - so the caret needs the same treatment the screens get.
   const snap = captureFocus(modal);
   modal.className = cls ? `modal ${cls}` : "modal";
-  modal.innerHTML = html;
+  modal.innerHTML = html +
+    `<div class="sr-only" id="modal-announce" role="status" aria-live="polite"></div>`;
   const title = $("#modal header h2");
   if (title) { title.id = "modal-title"; modal.setAttribute("aria-labelledby", "modal-title"); }
   backdrop.hidden = false;
@@ -1596,7 +1624,7 @@ async function modelDialog(model, opts = {}) {
   const isOpen = () => openDialog === me && !$("#modal-backdrop").hidden;
   // One lock for every button that writes, so two of them can't save the
   // same thing at once.
-  const busy = { pending: false };
+  const busy = { current: null };
   // Photos, the cover and log entries save the moment they change, so the
   // list behind can be out of date even when the dialog is cancelled.
   let dirty = false;
@@ -1908,6 +1936,9 @@ async function modelDialog(model, opts = {}) {
     if (!m.name) { tab = "details"; render(); toast("Please give this mini a name"); return false; }
     const saved = await call(App().SaveModel, m);
     m = { ...m, ...saved };
+    // A new mini now exists, whatever happens next, so the list behind
+    // needs redrawing on the way out.
+    dirty = true;
     return true;
   }
 
@@ -1920,10 +1951,20 @@ async function modelDialog(model, opts = {}) {
   // Whether the log form holds something that would be lost: a new entry
   // with words or a time in it (the timer's minutes count), or an existing
   // entry changed since it was opened for editing.
+  // The time in the form, in minutes, or null if it can't be read. An entry
+  // opened for editing keeps its own time as it was, even one longer than a
+  // new entry could be given.
+  function draftMinutes() {
+    const typed = String(editSession.minutes == null ? "" : editSession.minutes).trim();
+    const was = editSession.id && (m.sessions || []).find(x => x.id === editSession.id);
+    if (was && typed === String(was.minutes || "")) return was.minutes || 0;
+    return minutesOf(typed);
+  }
+
   function draftChanged() {
     const notes = (editSession.notes || "").trim();
     const typed = String(editSession.minutes == null ? "" : editSession.minutes).trim();
-    const mins = minutesOf(typed);
+    const mins = draftMinutes();
     if (!editSession.id) return !!(notes || typed);
     if (mins === null) return true;
     const was = (m.sessions || []).find(x => x.id === editSession.id) || {};
@@ -1932,7 +1973,7 @@ async function modelDialog(model, opts = {}) {
   }
 
   function confirmDiscard() {
-    const mins = minutesOf(editSession.minutes);
+    const mins = draftMinutes();
     const what = editSession.id ? "Your changes to this log entry haven't been saved."
       : mins ? `This log entry and its ${duration(mins)} haven't been saved.`
       : "This log entry hasn't been saved.";
@@ -1942,14 +1983,18 @@ async function modelDialog(model, opts = {}) {
   // Closing with the log form half filled in - most often straight after
   // stopping the timer - asks first rather than losing the time.
   async function askBeforeClosing() {
+    // Not while something is being saved: its redraw would bring the dialog
+    // straight back.
+    if (busy.current) return false;
     collect();
     return !draftChanged() || await confirmDiscard();
   }
 
-  // The store keeps Started no later than the earliest log entry, and a
-  // Started typed on the Details tab and not yet saved is the user's: the
-  // earlier of the two stands.
+  // The store keeps Started no later than the earliest log entry. A Started
+  // typed on the Details tab and not yet saved is the user's, so only an
+  // entry dated before it pulls it back - not the saved value it replaced.
   const earlier = (a, b) => !a ? b : !b ? a : (a < b ? a : b);
+  const oldestEntry = sessions => (sessions || []).map(x => x.date).filter(Boolean).sort()[0] || "";
 
   // An Undo arrives after its toast, by which time this dialog may be closed;
   // it then refreshes the screen behind instead of reopening it.
@@ -1959,7 +2004,7 @@ async function modelDialog(model, opts = {}) {
       dirty = true;
       m.photos = updated.photos || [];
       m.sessions = updated.sessions || [];
-      m.started = earlier(m.started, updated.started);
+      m.started = earlier(m.started, oldestEntry(m.sessions));
       render();
     } else {
       show(state.screen);
@@ -1975,7 +2020,7 @@ async function modelDialog(model, opts = {}) {
       toast("Write a line about this session to log its time, or clear the time to save without it");
       return false;
     }
-    const minutes = minutesOf(editSession.minutes);
+    const minutes = draftMinutes();
     if (minutes === null) {
       if (tab !== "log") { tab = "log"; render(); }
       toast("That time didn't make sense — write it like 90, 1h 30m or 1:30");
@@ -1991,7 +2036,7 @@ async function modelDialog(model, opts = {}) {
     if (!updated) return false;
     dirty = true;
     m.sessions = updated.sessions || [];
-    m.started = earlier(m.started, updated.started);
+    m.started = earlier(m.started, oldestEntry(m.sessions));
     editSession = {};
     render();
     toast("Session logged");
