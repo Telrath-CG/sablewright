@@ -119,11 +119,12 @@ jobs:
       # the number alone cannot tell two downloads apart.
       #
       # RELEASE is the package release number of the Linux packages: this
-      # run's number, on every build. Two builds of one version are then never
-      # two different packages with the same name and version, and since run
-      # numbers only climb, a tagged release - always pushed after the merge
-      # that set its version - sorts above the rolling builds before it,
-      # instead of looking like a downgrade to someone who installed one.
+      # run's number, on every build. Two runs never share it, so two builds
+      # of one version get different package versions (a re-run of the same
+      # run keeps its number, and rebuilds the same commit). Run numbers
+      # climb, so a tagged release - pushed after the merge that set its
+      # version - sorts above the rolling builds before it, instead of
+      # looking like a downgrade to someone who installed one.
       - name: Work out the build version
         shell: bash
         run: |
@@ -498,6 +499,9 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           REF_NAME: ${{ github.ref_name }}
         run: |
+          # pipefail, so a failed API call fails the step rather than reaching
+          # jq as empty input and reporting nothing to remove.
+          set -o pipefail
           # The ref name is handed to jq as data, not pasted into the filter:
           # a branch name can hold a quote.
           gh api --paginate "repos/$REPO/actions/artifacts?per_page=100" \
