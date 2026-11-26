@@ -297,6 +297,7 @@ func openStore(dir string) (s *Store, warning string, err error) {
 		return nil, "", fmt.Errorf("could not create the data folder: %w", err)
 	}
 	s = &Store{dir: dir, path: filepath.Join(dir, "collection.json")}
+	s.RemoveStaleStaging()
 	err = s.load()
 	var aside *setAsideError
 	if errors.As(err, &aside) {
@@ -419,10 +420,43 @@ func (s *Store) SnapshotOnStartup(stamp string) error {
 	}
 	made = append(made, name)
 	sort.Strings(made)
-	for i := 0; i < len(made)-rollingBackups; i++ {
-		_ = os.Remove(filepath.Join(s.BackupDir(), made[i]))
+	// Copies taken before the collection was last found unreadable are the
+	// good ones, and launches on the fresh collection that replaced it would
+	// otherwise rotate them out one by one. They are left out of the count
+	// for as long as the set-aside file is there to say a loss happened.
+	lost := s.lastSetAside()
+	var rotating []string
+	for _, n := range made {
+		if snapshotStamp(n) >= lost {
+			rotating = append(rotating, n)
+		}
+	}
+	for i := 0; i < len(rotating)-rollingBackups; i++ {
+		_ = os.Remove(filepath.Join(s.BackupDir(), rotating[i]))
 	}
 	return nil
+}
+
+// snapshotStamp is the time a rolling copy was taken, as written in its name.
+func snapshotStamp(name string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(name, "collection-"), ".json")
+}
+
+// lastSetAside is the time of the most recent collection file set aside as
+// unreadable, in the same form as a snapshot's stamp, or "" if there is none.
+func (s *Store) lastSetAside() string {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return ""
+	}
+	prefix := filepath.Base(s.path) + ".corrupt-"
+	last := ""
+	for _, e := range entries {
+		if stamp, ok := strings.CutPrefix(e.Name(), prefix); ok && stamp > last {
+			last = stamp
+		}
+	}
+	return last
 }
 
 // rollingSnapshots lists the automatic copies, oldest first. The names carry
@@ -467,14 +501,15 @@ func (s *Store) migrate() {
 	s.addLibraryPaints()
 }
 
-// mergeDuplicateProjects folds records that share a name into the first of
-// them, keeping every deadline and note a later one would otherwise hide.
+// mergeDuplicateProjects folds records that share a name into one. The last
+// of them wins where they disagree, because it is the one the Projects screen
+// was showing; notes from the others are kept beneath its own.
 func mergeDuplicateProjects(in []ProjectMeta) []ProjectMeta {
 	out := make([]ProjectMeta, 0, len(in))
 	at := map[string]int{}
 	for _, p := range in {
 		if i, ok := at[p.Name]; ok {
-			out[i] = mergeProjectMeta(out[i], p)
+			out[i] = mergeProjectMeta(p, out[i])
 			continue
 		}
 		at[p.Name] = len(out)
@@ -1152,7 +1187,8 @@ func (s *Store) RenameProject(from, to string) (int, error) {
 			md := md
 			src = &md
 		} else {
-			*src = mergeProjectMeta(*src, md)
+			// The later record is the one that was being shown, so it wins.
+			*src = mergeProjectMeta(md, *src)
 		}
 	}
 	if src != nil && to != "" {
@@ -1185,9 +1221,12 @@ func mergeProjectMeta(into, from ProjectMeta) ProjectMeta {
 	}
 	a, b := strings.TrimSpace(into.Notes), strings.TrimSpace(from.Notes)
 	switch {
-	case a == "":
+	case b == "" || strings.Contains(a, b):
+		// Nothing to add: no notes, or the same ones already there.
+	case strings.Contains(b, a):
+		// The other record's notes are these plus more - an edit of them.
 		into.Notes = from.Notes
-	case b != "" && a != b:
+	default:
 		into.Notes = into.Notes + "\n\n" + from.Notes
 	}
 	return into

@@ -219,14 +219,18 @@ func TestPhotoEntryNameTakesOnlyPlainNamesDirectlyInPhotos(t *testing.T) {
 // mini's photo would otherwise have it deleted on the next launch.
 func TestRestoreFromDropsPhotoNamesThatLeaveThePhotosFolder(t *testing.T) {
 	s := currentCollection(t)
-	victim := filepath.Join(filepath.Dir(s.dir), "victim.txt")
-	if err := os.WriteFile(victim, []byte("keep me"), 0o644); err != nil {
-		t.Fatal(err)
+	// ../victim.txt from the photos folder is the data folder itself, and
+	// ../../victim.txt the folder above it: one file at each.
+	victims := []string{filepath.Join(s.dir, "victim.txt"), filepath.Join(filepath.Dir(s.dir), "victim.txt")}
+	for _, v := range victims {
+		if err := os.WriteFile(v, []byte("keep me"), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	collection := `{"version":5,"nextId":200,"models":[{"id":7,"name":"Restored","count":1,"photos":[` +
 		`{"id":8,"file":"../../victim.txt"},{"id":9,"file":"ok.jpg","thumb":"../t_ok.jpg"}]}],` +
 		`"trash":[{"deleted":"2000-01-01","model":{"id":3,"name":"Old","count":1,` +
-		`"photos":[{"id":4,"file":"../victim.txt"}]}}]}`
+		`"photos":[{"id":4,"file":"../victim.txt","thumb":"../../victim.txt"}]}}]}`
 	zipPath := filepath.Join(t.TempDir(), "backup.zip")
 	writeZip(t, zipPath, map[string]string{
 		"collection.json": collection,
@@ -245,8 +249,79 @@ func TestRestoreFromDropsPhotoNamesThatLeaveThePhotosFolder(t *testing.T) {
 	}
 	// What the old code did on the next launch.
 	s.PurgeTrash(day("2026-08-08"))
-	if b, err := os.ReadFile(victim); err != nil || string(b) != "keep me" {
-		t.Errorf("a file outside the data folder was touched (%v)", err)
+	for _, v := range victims {
+		if b, err := os.ReadFile(v); err != nil || string(b) != "keep me" {
+			t.Errorf("%s, outside the photos folder, was touched (%v)", v, err)
+		}
+	}
+}
+
+// The second line of defence: wherever a name becomes a path, it is checked
+// again, so a record that got past decoding still can't reach outside.
+func TestPhotoPathRefusesAnythingButAPlainName(t *testing.T) {
+	s := newTempStore(t)
+	for _, name := range []string{"", "..", "../x.jpg", "a/b.jpg", `a\b.jpg`, "C:x.jpg",
+		"x.jpg:stream", ".hidden.jpg", "x.jpg.", "x.jpg ", " ..", "/abs.jpg"} {
+		if p, ok := s.photoPath(name); ok {
+			t.Errorf("photoPath(%q) = %q, want it refused", name, p)
+		}
+	}
+	if p, ok := s.photoPath("m1_2.jpg"); !ok || p != filepath.Join(s.PhotoDir(), "m1_2.jpg") {
+		t.Errorf("photoPath(m1_2.jpg) = %q, %v; want the file in the photos folder", p, ok)
+	}
+}
+
+// A backup can only bring picture files into the photos folder, even ones its
+// collection names as photos: a shortcut or a script there is one double-click
+// away from running, and on Windows a shortcut's icon is fetched as soon as
+// the folder is shown.
+func TestRestoreFromBringsOnlyPicturesIntoThePhotosFolder(t *testing.T) {
+	s := currentCollection(t)
+	collection := `{"version":5,"nextId":200,"models":[{"id":7,"name":"Restored","count":1,"photos":[` +
+		`{"id":8,"file":"evil.url"},{"id":9,"file":"run.bat"},{"id":10,"file":"x.desktop"},` +
+		`{"id":11,"file":"ok.png","thumb":"t_ok.lnk"}]}]}`
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	writeZip(t, zipPath, map[string]string{
+		"collection.json":  collection,
+		"photos/evil.url":  "[InternetShortcut]",
+		"photos/run.bat":   "echo",
+		"photos/x.desktop": "[Desktop Entry]",
+		"photos/ok.png":    "png",
+		"photos/t_ok.lnk":  "shortcut",
+	})
+	if err := s.RestoreFrom(zipPath, "20260808-090000"); err != nil {
+		t.Fatalf("RestoreFrom(): %v", err)
+	}
+	if got := dirNames(t, s.PhotoDir()); len(got) != 1 || got[0] != "ok.png" {
+		t.Errorf("photos folder holds %v, want only ok.png", got)
+	}
+}
+
+// With no photos folder to set aside, a failed import must not leave the app
+// without one, nor point at a kept folder that doesn't exist.
+func TestRestoreFromWithNoPhotosFolderRecoversFromAFailedSave(t *testing.T) {
+	s := currentCollection(t)
+	if err := os.RemoveAll(s.PhotoDir()); err != nil {
+		t.Fatal(err)
+	}
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	writeZip(t, zipPath, map[string]string{
+		"collection.json": `{"version":5,"nextId":200,"models":[{"id":7,"name":"R","count":1,` +
+			`"photos":[{"id":8,"file":"a.jpg"}]}]}`,
+		"photos/a.jpg": "photo",
+	})
+	if err := os.Mkdir(s.path+".tmp", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := s.RestoreFrom(zipPath, "20260808-090000")
+	if err == nil {
+		t.Fatal("RestoreFrom() succeeded, want the failed save reported")
+	}
+	if strings.Contains(err.Error(), "before-restore") {
+		t.Errorf("error %q points at a kept photos folder that never existed", err)
+	}
+	if got := dirNames(t, s.PhotoDir()); len(got) != 0 {
+		t.Errorf("photos folder holds %v, want it back and empty", got)
 	}
 }
 

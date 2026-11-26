@@ -223,20 +223,41 @@ func TestRenameProjectCarriesEveryRecordUnderTheOldName(t *testing.T) {
 }
 
 // The upgrade folds duplicate records left by the old rename into one, so
-// an edit to the project lands on the record that is read.
+// an edit to the project lands on the record that is read. The last record
+// wins where they disagree: it is the one the Projects screen was showing.
 func TestMigrateMergesDuplicateProjectRecords(t *testing.T) {
 	s := newTempStore(t)
 	s.data = Data{Version: 5, NextID: 100, Projects: []ProjectMeta{
-		{Name: "B", Notes: "first"},
+		{Name: "B", Due: "2026-01-01", Notes: "first"},
 		{Name: "A", Due: "2026-09-01"},
-		{Name: "B", Due: "2026-08-15", Notes: "second"},
+		{Name: "B", Due: "2026-12-31", Notes: "second"},
 	}}
+	shown := s.Projects(day("2026-08-08"))
 	s.migrate()
 	if len(s.data.Projects) != 2 {
 		t.Fatalf("stored %+v, want A and one B", s.data.Projects)
 	}
 	b := s.data.Projects[0]
-	if b.Name != "B" || b.Due != "2026-08-15" || b.Notes != "first\n\nsecond" {
-		t.Errorf("merged B = %+v, want the deadline and both notes", b)
+	if b.Name != "B" || b.Due != "2026-12-31" || b.Notes != "second\n\nfirst" {
+		t.Errorf("merged B = %+v, want the shown deadline and both notes", b)
+	}
+	after := s.Projects(day("2026-08-08"))
+	for i := range shown {
+		if shown[i].Name == "B" && shown[i].Due != after[i].Due {
+			t.Errorf("B's deadline shown as %s before the upgrade and %s after", shown[i].Due, after[i].Due)
+		}
+	}
+}
+
+// Notes that are an edit of the other record's - the same text and more -
+// are kept once, not twice.
+func TestMergeProjectMetaKeepsAnEditedNoteOnce(t *testing.T) {
+	got := mergeProjectMeta(ProjectMeta{Notes: "Base the squad"}, ProjectMeta{Notes: "Base the squad, then varnish"})
+	if got.Notes != "Base the squad, then varnish" {
+		t.Errorf("notes = %q, want the fuller note once", got.Notes)
+	}
+	got = mergeProjectMeta(ProjectMeta{Notes: "Base the squad, then varnish"}, ProjectMeta{Notes: "Base the squad"})
+	if got.Notes != "Base the squad, then varnish" {
+		t.Errorf("notes = %q, want the fuller note once", got.Notes)
 	}
 }

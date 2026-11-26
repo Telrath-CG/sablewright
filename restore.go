@@ -16,19 +16,26 @@ var photoExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".bmp": true, ".webp": true,
 }
 
-// photoPattern is photoExts as a file dialog filter.
-const photoPattern = "*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp"
+// photoPattern is photoExts as a file dialog filter. Each is listed in both
+// cases because GTK matches patterns case-sensitively, and a camera's
+// IMG_0001.JPG would otherwise not be offered on Linux.
+const photoPattern = "*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp;" +
+	"*.PNG;*.JPG;*.JPEG;*.GIF;*.BMP;*.WEBP"
 
-// viewableExts are the files OpenPhoto will hand to the system opener, which
-// runs a script as readily as it shows a picture. It is photoExts plus the
-// picture formats older versions took in through an "All files" option, so
-// photos already in a collection keep opening.
+// viewableExts are the picture formats a photo file may be. OpenPhoto hands
+// only these to the system opener, which runs a script as readily as it
+// shows a picture, and an import restores only these, so a backup can't put
+// a shortcut or a script in the photos folder for someone to double-click.
+// It is photoExts plus the picture formats older versions took in through an
+// "All files" option, so photos already in a collection keep working.
 var viewableExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".bmp": true, ".webp": true,
 	".jfif": true, ".heic": true, ".heif": true, ".tif": true, ".tiff": true, ".avif": true,
+	".jxl": true, ".dng": true, ".raw": true, ".cr2": true, ".cr3": true, ".nef": true,
+	".arw": true, ".orf": true, ".rw2": true, ".psd": true,
 }
 
-// isViewableImage reports whether a file is a picture OpenPhoto may open.
+// isViewableImage reports whether a file is in one of the picture formats.
 func isViewableImage(name string) bool {
 	return viewableExts[strings.ToLower(filepath.Ext(name))]
 }
@@ -37,11 +44,14 @@ func isViewableImage(name string) bool {
 // whatever folder it is joined onto. Photo names are read from the collection
 // file, and a collection can arrive in a backup someone else made, so a name
 // is never trusted to be one the app wrote: it must not climb out with "..",
-// name another folder, carry a drive or stream (":"), or hide with a leading
-// dot. On Windows filepath.IsLocal also refuses device names such as CON.
+// name another folder, carry a drive or stream (":"), hide with a leading
+// dot, or end in a dot or space, which Windows strips - " .." would name the
+// folder above. On Windows filepath.IsLocal also refuses device names such
+// as CON.
 func safeFileName(name string) bool {
 	return name != "" && name == filepath.Base(name) && filepath.IsLocal(name) &&
-		!strings.ContainsAny(name, `/\:`) && !strings.HasPrefix(name, ".")
+		!strings.ContainsAny(name, `/\:`) && !strings.HasPrefix(name, ".") &&
+		!strings.HasSuffix(name, ".") && !strings.HasSuffix(name, " ")
 }
 
 // photoPath is where a photo named in the collection lives, or false if the
@@ -104,9 +114,9 @@ func photoFiles(d *Data) map[string]bool {
 // backup zip. stamp names the folder the current collection is kept in.
 //
 // A backup is a file someone handed over, so it is read for what a backup
-// holds and nothing more: collection.json, and the files directly under
-// photos/ that the collection says are its photos. Everything else in the
-// zip is ignored, whatever it is called.
+// holds and nothing more: collection.json, and the picture files directly
+// under photos/ that the collection says are its photos. Everything else in
+// the zip is ignored, whatever it is called.
 //
 // Nothing current is touched until the whole backup has been read and
 // unpacked, and the current collection and photos are moved into
@@ -147,7 +157,8 @@ func (s *Store) RestoreFrom(src, stamp string) error {
 	wanted := photoFiles(restored)
 	var photos []*zip.File
 	for _, f := range zr.File {
-		if name := photoEntryName(f.Name); name != "" && wanted[name] && !f.FileInfo().IsDir() {
+		name := photoEntryName(f.Name)
+		if name != "" && wanted[name] && isViewableImage(name) && !f.FileInfo().IsDir() {
 			photos = append(photos, f)
 		}
 	}
@@ -184,11 +195,17 @@ func (s *Store) RestoreFrom(src, stamp string) error {
 		return fmt.Errorf("could not keep a copy of the current collection: %w", err)
 	}
 	keptPhotos := filepath.Join(kept, "photos")
-	if err := os.Rename(s.PhotoDir(), keptPhotos); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("could not set the current photos aside: %w", err)
+	hadPhotos := true
+	if err := os.Rename(s.PhotoDir(), keptPhotos); err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("could not set the current photos aside: %w", err)
+		}
+		hadPhotos = false
 	}
 	if err := os.Rename(staged, s.PhotoDir()); err != nil {
-		if rerr := os.Rename(keptPhotos, s.PhotoDir()); rerr != nil {
+		if !hadPhotos {
+			_ = os.MkdirAll(s.PhotoDir(), 0o755)
+		} else if rerr := os.Rename(keptPhotos, s.PhotoDir()); rerr != nil {
 			return fmt.Errorf("could not put the backup's photos in place (%v), and your "+
 				"current photos are still in %s: %w", err, keptPhotos, rerr)
 		}
@@ -206,9 +223,14 @@ func (s *Store) RestoreFrom(src, stamp string) error {
 		// photos on disk. The file itself was never replaced.
 		s.data = previous
 		if rerr := os.Rename(s.PhotoDir(), staged); rerr != nil {
-			return fmt.Errorf("%w; your current photos are in %s", err, keptPhotos)
+			if hadPhotos {
+				return fmt.Errorf("%w; your current photos are in %s", err, keptPhotos)
+			}
+			return err
 		}
-		if rerr := os.Rename(keptPhotos, s.PhotoDir()); rerr != nil {
+		if !hadPhotos {
+			_ = os.MkdirAll(s.PhotoDir(), 0o755)
+		} else if rerr := os.Rename(keptPhotos, s.PhotoDir()); rerr != nil {
 			return fmt.Errorf("%w; your current photos are in %s", err, keptPhotos)
 		}
 		return err
@@ -218,7 +240,8 @@ func (s *Store) RestoreFrom(src, stamp string) error {
 
 // RemoveStaleStaging deletes staging folders an import left behind when the
 // app was closed or crashed part way through one. Nothing reads them, and an
-// import that got that far never touched the collection.
+// import that got that far never touched the collection. It runs as the
+// store opens, before anything can start an import of its own.
 func (s *Store) RemoveStaleStaging() {
 	entries, err := os.ReadDir(s.dir)
 	if err != nil {
