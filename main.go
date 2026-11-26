@@ -2,11 +2,13 @@ package main
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -84,6 +86,18 @@ func photoRoutes(photos http.Handler) application.Middleware {
 func main() {
 	app := NewApp()
 
+	// A second launch stops inside New and hands over to this one, so it
+	// never gets as far as opening the collection below. Where the lock
+	// can't work at all (Linux without a session bus) the app runs without
+	// it, as v2 did, rather than not at all.
+	var single *application.SingleInstanceOptions
+	if singleInstanceUsable() {
+		single = &application.SingleInstanceOptions{
+			UniqueID:               appID,
+			OnSecondInstanceLaunch: app.onSecondInstance,
+		}
+	}
+
 	wails := application.New(application.Options{
 		Name:        "Sablewright",
 		Description: "Track your miniature painting projects.",
@@ -93,11 +107,19 @@ func main() {
 			Handler:    application.AssetFileServerFS(assets),
 			Middleware: photoRoutes(photoHandler{dir: filepath.Join(DataDir(), "photos")}),
 		},
-		// A second launch stops inside New and hands over to this one, so
-		// it never gets as far as opening the collection below.
-		SingleInstance: &application.SingleInstanceOptions{
-			UniqueID:               appID,
-			OnSecondInstanceLaunch: app.onSecondInstance,
+		SingleInstance: single,
+		// Wails reports a failure it can't recover from here and then exits.
+		// Its logger writes nowhere in a release build, so without this a
+		// window that couldn't be created would just never appear; fatal
+		// leaves a log beside the data and opens it, as it does for a
+		// collection that won't open.
+		ErrorHandler: func(err error) {
+			var fe *application.FatalError
+			if errors.As(err, &fe) {
+				fatal("Sablewright hit a problem and had to stop.\n\n" + err.Error())
+				return
+			}
+			fmt.Fprintln(os.Stderr, err)
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
@@ -111,6 +133,31 @@ func main() {
 	})
 	app.app = wails
 
+	// macOS gets the menus every Mac app has - the app menu, Edit for copy
+	// and paste in text fields, and Window. Left to itself Wails adds File,
+	// View and Help as well, whose Help item replaces this window with the
+	// Wails website and whose View items reload the page, losing a running
+	// timer.
+	if runtime.GOOS == "darwin" {
+		menu := application.NewMenu()
+		menu.AddRole(application.AppMenu)
+		menu.AddRole(application.EditMenu)
+		menu.AddRole(application.WindowMenu)
+		wails.Menu.Set(menu)
+	}
+
+	// The window is made before the collection is opened so a second launch
+	// in the meantime has a window to bring forward. Nothing is drawn until
+	// Run, by which time the store is in place.
+	app.win = wails.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            "Sablewright",
+		Width:            1180,
+		Height:           760,
+		MinWidth:         940,
+		MinHeight:        600,
+		BackgroundColour: application.NewRGB(238, 241, 245),
+	})
+
 	store, warning, err := NewStore()
 	if err != nil {
 		// A store that won't open is fatal, but the message must reach the
@@ -120,19 +167,6 @@ func main() {
 	}
 	app.store = store
 	app.loadErr = warning
-
-	app.win = wails.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "Sablewright",
-		Width:            1180,
-		Height:           760,
-		MinWidth:         940,
-		MinHeight:        600,
-		BackgroundColour: application.NewRGB(238, 241, 245),
-		Linux: application.LinuxWindow{
-			Icon:             icon,
-			WebviewGpuPolicy: application.WebviewGpuPolicyOnDemand,
-		},
-	})
 
 	if err := wails.Run(); err != nil {
 		fatal("Sablewright hit a problem and had to stop.\n\n" + err.Error())
