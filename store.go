@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -941,7 +942,7 @@ func (s *Store) AddPhoto(modelID int, srcPath, kind string) (Model, error) {
 // if it's taken - two records must never share a file, or deleting one
 // destroys the other.
 func (s *Store) newPhotoFile(modelID int, ext string, data []byte) (string, error) {
-	stamp := time.Now().UnixNano()
+	stamp := uniqueStamp()
 	for try := 0; try < 100; try++ {
 		name := fmt.Sprintf("m%d_%d%s", modelID, stamp+int64(try), ext)
 		f, err := os.OpenFile(filepath.Join(s.PhotoDir(), name), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
@@ -963,6 +964,26 @@ func (s *Store) newPhotoFile(modelID int, ext string, data []byte) (string, erro
 		return name, nil
 	}
 	return "", fmt.Errorf("no free file name in the photos folder")
+}
+
+// lastStamp is the last photo stamp handed out.
+var lastStamp atomic.Int64
+
+// uniqueStamp is the clock in nanoseconds, but never the same value twice in
+// one run of the app. A photo's name and its thumbnail's are both made from
+// it, and the thumbnail's drops the extension - so two photos stamped alike,
+// one .png and one .jpg, would share a thumbnail even with distinct names.
+func uniqueStamp() int64 {
+	for {
+		last := lastStamp.Load()
+		now := time.Now().UnixNano()
+		if now <= last {
+			now = last + 1
+		}
+		if lastStamp.CompareAndSwap(last, now) {
+			return now
+		}
+	}
 }
 
 // DeletePhoto takes a photo off a mini and into the photo trash, where

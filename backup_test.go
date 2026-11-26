@@ -141,3 +141,24 @@ func TestAddPhotoGivesEveryPhotoItsOwnFile(t *testing.T) {
 		t.Errorf("%d distinct files for %d photos", len(files), n)
 	}
 }
+
+// A photo's thumbnail name drops its extension, so photos stamped alike would
+// share a thumbnail even with distinct names. Stamps are never reused.
+func TestUniqueStampNeverRepeats(t *testing.T) {
+	seen := map[int64]bool{}
+	results := make(chan int64, 1000)
+	for g := 0; g < 10; g++ {
+		go func() {
+			for i := 0; i < 100; i++ {
+				results <- uniqueStamp()
+			}
+		}()
+	}
+	for i := 0; i < 1000; i++ {
+		v := <-results
+		if seen[v] {
+			t.Fatalf("stamp %d handed out twice", v)
+		}
+		seen[v] = true
+	}
+}
