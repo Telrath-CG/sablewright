@@ -97,11 +97,10 @@ if not defined GOBIN (
 )
 set "PATH=%GOBIN%;%PATH%"
 
-if exist "%GOBIN%\wails.exe" (
-    echo         Already installed.
-) else (
-    "%GOEXE%" install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
-)
+rem Always installed, even over an existing copy: `go install` of a pinned
+rem version is quick when it's already there, and an older Wails left over
+rem from a previous build would otherwise be used without a word.
+"%GOEXE%" install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
 
 if not exist "%GOBIN%\wails.exe" (
     echo.

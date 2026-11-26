@@ -200,3 +200,43 @@ func TestMergeProjectMetaKeepsTheTargetsDeadline(t *testing.T) {
 		t.Errorf("notes = %q, want identical notes kept once", got.Notes)
 	}
 }
+
+// Files written before renames merged can hold two records under one name.
+// Renaming that name has to carry both across, not keep the last and drop
+// the other's notes and deadline.
+func TestRenameProjectCarriesEveryRecordUnderTheOldName(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100, Projects: []ProjectMeta{
+		{Name: "B", Due: "2026-08-15"},
+		{Name: "B", Notes: "Second record's notes."},
+	}}
+	if _, err := s.RenameProject("B", "C"); err != nil {
+		t.Fatalf("RenameProject(): %v", err)
+	}
+	if len(s.data.Projects) != 1 {
+		t.Fatalf("stored %+v, want one record", s.data.Projects)
+	}
+	got := s.data.Projects[0]
+	if got.Name != "C" || got.Due != "2026-08-15" || got.Notes != "Second record's notes." {
+		t.Errorf("got %+v, want both records' details under C", got)
+	}
+}
+
+// The upgrade folds duplicate records left by the old rename into one, so
+// an edit to the project lands on the record that is read.
+func TestMigrateMergesDuplicateProjectRecords(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{Version: 5, NextID: 100, Projects: []ProjectMeta{
+		{Name: "B", Notes: "first"},
+		{Name: "A", Due: "2026-09-01"},
+		{Name: "B", Due: "2026-08-15", Notes: "second"},
+	}}
+	s.migrate()
+	if len(s.data.Projects) != 2 {
+		t.Fatalf("stored %+v, want A and one B", s.data.Projects)
+	}
+	b := s.data.Projects[0]
+	if b.Name != "B" || b.Due != "2026-08-15" || b.Notes != "first\n\nsecond" {
+		t.Errorf("merged B = %+v, want the deadline and both notes", b)
+	}
+}

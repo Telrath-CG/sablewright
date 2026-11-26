@@ -496,3 +496,56 @@ func TestPaintUsageCountsMinisNotMentions(t *testing.T) {
 		t.Errorf("counts = %v, want 5 on 2 minis and 6 on 1", got)
 	}
 }
+
+// Photos only arrive through AddPhoto, which needs a saved mini. Whatever
+// list the page sends with a new one is dropped, so the page can't name
+// files for the app to delete or export later.
+func TestSaveModelStartsANewMiniWithNoPhotos(t *testing.T) {
+	s := newTempStore(t)
+	s.data = Data{NextID: 100}
+	m, err := s.SaveModel(Model{Name: "New", Count: 1, Photos: []Photo{{ID: 1, File: "../../x"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Photos) != 0 || len(s.data.Models[0].Photos) != 0 {
+		t.Errorf("new mini saved with photos %+v, want none", s.data.Models[0].Photos)
+	}
+}
+
+// Only picture formats are kept: OpenPhoto hands these files to the system
+// opener, which runs a script as readily as it shows a picture.
+func TestAddPhotoRefusesAFileThatIsNotAPicture(t *testing.T) {
+	s := newTempStore(t)
+	if err := os.MkdirAll(s.PhotoDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.data = Data{NextID: 100, Models: []Model{{ID: 1, Name: "Marine", Count: 1}}}
+	src := filepath.Join(t.TempDir(), "run.bat")
+	if err := os.WriteFile(src, []byte("echo"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddPhoto(1, src, "Progress"); err == nil {
+		t.Error("AddPhoto() kept a .bat file, want it refused")
+	}
+	if entries, _ := os.ReadDir(s.PhotoDir()); len(entries) != 0 {
+		t.Errorf("photos folder holds %d files, want none", len(entries))
+	}
+}
+
+// A hand-edited or handed-over collection file is read with the same care as
+// a backup: a photo name that leaves the photos folder doesn't survive load.
+func TestLoadDropsPhotoNamesThatLeaveThePhotosFolder(t *testing.T) {
+	s := newTempStore(t)
+	raw := `{"version":6,"nextId":10,"models":[{"id":1,"name":"M","count":1,"photos":[` +
+		`{"id":2,"file":"../x.jpg"},{"id":3,"file":"ok.jpg","thumb":"..\\t.jpg"}]}]}`
+	if err := os.WriteFile(s.path, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.load(); err != nil {
+		t.Fatal(err)
+	}
+	ps := s.data.Models[0].Photos
+	if len(ps) != 1 || ps[0].File != "ok.jpg" || ps[0].Thumb != "" {
+		t.Errorf("photos = %+v, want only ok.jpg, its thumbnail name cleared", ps)
+	}
+}

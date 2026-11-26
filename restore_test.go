@@ -3,6 +3,7 @@ package main
 import (
 	"archive/zip"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -188,30 +189,124 @@ func TestRestoreFromLeavesEverythingAloneOnABadBackup(t *testing.T) {
 	}
 }
 
-func TestPhotoEntryNameTakesOnlyImagesDirectlyInPhotos(t *testing.T) {
+func TestPhotoEntryNameTakesOnlyPlainNamesDirectlyInPhotos(t *testing.T) {
 	cases := map[string]string{
 		"photos/m1_2.jpg":     "m1_2.jpg",
 		"photos/t_m1_2.jpg":   "t_m1_2.jpg",
-		"photos/SHOT.PNG":     "SHOT.PNG",
-		"photos/run.bat":      "",
-		"photos/a.jpg.exe":    "",
+		"photos/SHOT.HEIC":    "SHOT.HEIC",
+		"photos/no-extension": "no-extension",
 		"photos/sub/a.jpg":    "",
 		"photos/..\\a.jpg":    "",
 		"photos/C:a.jpg":      "",
 		"photos/.a.jpg":       "",
+		"photos/..":           "",
 		"photos/":             "",
 		"collection.json":     "",
 		"elsewhere/a.jpg":     "",
 		"../photos/a.jpg":     "",
 		"photos/../a.jpg":     "",
-		"photos/a.jpeg":       "a.jpeg",
-		"photos/a.webp":       "a.webp",
-		"photos/no-extension": "",
 	}
 	for entry, want := range cases {
 		if got := photoEntryName(entry); got != want {
 			t.Errorf("photoEntryName(%q) = %q, want %q", entry, got, want)
 		}
+	}
+}
+
+// A collection's photo names become paths - to delete a purged photo, to make
+// a thumbnail, to export - so one that climbs out of the photos folder must
+// never get that far. A backup that names ../../.ssh/id_rsa as a trashed
+// mini's photo would otherwise have it deleted on the next launch.
+func TestRestoreFromDropsPhotoNamesThatLeaveThePhotosFolder(t *testing.T) {
+	s := currentCollection(t)
+	victim := filepath.Join(filepath.Dir(s.dir), "victim.txt")
+	if err := os.WriteFile(victim, []byte("keep me"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	collection := `{"version":5,"nextId":200,"models":[{"id":7,"name":"Restored","count":1,"photos":[` +
+		`{"id":8,"file":"../../victim.txt"},{"id":9,"file":"ok.jpg","thumb":"../t_ok.jpg"}]}],` +
+		`"trash":[{"deleted":"2000-01-01","model":{"id":3,"name":"Old","count":1,` +
+		`"photos":[{"id":4,"file":"../victim.txt"}]}}]}`
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	writeZip(t, zipPath, map[string]string{
+		"collection.json": collection,
+		"photos/ok.jpg":   "fine",
+	})
+	if err := s.RestoreFrom(zipPath, "20260808-090000"); err != nil {
+		t.Fatalf("RestoreFrom(): %v", err)
+	}
+
+	photos := s.data.Models[0].Photos
+	if len(photos) != 1 || photos[0].File != "ok.jpg" || photos[0].Thumb != "" {
+		t.Errorf("photos = %+v, want only ok.jpg with its bad thumbnail name cleared", photos)
+	}
+	if got := s.data.Trash[0].Model.Photos; len(got) != 0 {
+		t.Errorf("trashed photos = %+v, want the climbing one dropped", got)
+	}
+	// What the old code did on the next launch.
+	s.PurgeTrash(day("2026-08-08"))
+	if b, err := os.ReadFile(victim); err != nil || string(b) != "keep me" {
+		t.Errorf("a file outside the data folder was touched (%v)", err)
+	}
+}
+
+// Photos added before the picker was limited, in formats like HEIC, are in
+// people's backups. Restoring one must bring them across: it is how a
+// collection moves to a new computer.
+func TestRestoreFromKeepsEveryPhotoTheCollectionUses(t *testing.T) {
+	s := currentCollection(t)
+	collection := `{"version":5,"nextId":200,"models":[{"id":7,"name":"Restored","count":1,"photos":[` +
+		`{"id":8,"file":"m7_1.heic"},{"id":9,"file":"m7_2.jpg","thumb":"t_m7_2.jpg"}]}]}`
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	writeZip(t, zipPath, map[string]string{
+		"collection.json":   collection,
+		"photos/m7_1.heic":  "from a phone",
+		"photos/m7_2.jpg":   "photo",
+		"photos/t_m7_2.jpg": "thumbnail",
+		"photos/stray.jpg":  "no record names this",
+		"photos/run.bat":    "no record names this either",
+	})
+	if err := s.RestoreFrom(zipPath, "20260808-090000"); err != nil {
+		t.Fatalf("RestoreFrom(): %v", err)
+	}
+	got := dirNames(t, s.PhotoDir())
+	want := []string{"m7_1.heic", "m7_2.jpg", "t_m7_2.jpg"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("photos folder holds %v, want %v", got, want)
+	}
+}
+
+// Saving a newer build's collection would drop whatever that build added.
+func TestRestoreFromRefusesABackupFromANewerVersion(t *testing.T) {
+	s := currentCollection(t)
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	writeZip(t, zipPath, map[string]string{
+		"collection.json": fmt.Sprintf(`{"version":%d,"nextId":2,"models":[]}`, dataVersion+1),
+	})
+	err := s.RestoreFrom(zipPath, "20260808-090000")
+	if err == nil || !strings.Contains(err.Error(), "newer version") {
+		t.Fatalf("RestoreFrom() = %v, want it refused as from a newer version", err)
+	}
+	if len(s.data.Models) != 1 || s.data.Models[0].Name != "Current" {
+		t.Errorf("models = %+v, want the current collection untouched", s.data.Models)
+	}
+}
+
+// An import interrupted part way leaves its staging folder; the next launch
+// clears it.
+func TestRemoveStaleStagingClearsLeftoverImports(t *testing.T) {
+	s := currentCollection(t)
+	if err := os.MkdirAll(filepath.Join(s.dir, ".restore-123", "photos"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s.RemoveStaleStaging()
+	for _, n := range dirNames(t, s.dir) {
+		if strings.HasPrefix(n, ".restore-") {
+			t.Errorf("%s survived", n)
+		}
+	}
+	if _, err := os.Stat(s.PhotoDir()); err != nil {
+		t.Errorf("the real photos folder went too: %v", err)
 	}
 }
 
@@ -278,5 +373,53 @@ func TestLoadDoesNotKeepFieldsTheFileLacks(t *testing.T) {
 	}
 	if len(s.data.Projects) != 0 {
 		t.Errorf("projects = %+v, want none: the file has none", s.data.Projects)
+	}
+}
+
+// The set-aside warning reaches the caller as a warning with a working store,
+// not as an error: as an error, main treated it as fatal and the app quit.
+func TestOpenStoreOpensOnAFreshCollectionWhenTheFileIsUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "collection.json"), []byte("{not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, warning, err := openStore(dir)
+	if err != nil {
+		t.Fatalf("openStore() = %v, want it to open", err)
+	}
+	if s == nil || warning == "" {
+		t.Fatalf("store %v, warning %q; want a store and a warning", s, warning)
+	}
+}
+
+// If the restored collection can't be saved, everything goes back: the
+// current collection in memory and the current photos on disk.
+func TestRestoreFromPutsEverythingBackWhenTheSaveFails(t *testing.T) {
+	s := currentCollection(t)
+	collection := `{"version":5,"nextId":200,"models":[{"id":7,"name":"Restored","count":1,` +
+		`"photos":[{"id":8,"file":"m7_1.jpg"}]}]}`
+	zipPath := filepath.Join(t.TempDir(), "backup.zip")
+	writeZip(t, zipPath, map[string]string{
+		"collection.json": collection,
+		"photos/m7_1.jpg": "restored photo",
+	})
+	// persist writes collection.json.tmp first; a folder in its place makes
+	// the save fail after the photos have been swapped.
+	if err := os.Mkdir(s.path+".tmp", 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.RestoreFrom(zipPath, "20260808-090000"); err == nil {
+		t.Fatal("RestoreFrom() succeeded, want the failed save reported")
+	}
+	if len(s.data.Models) != 1 || s.data.Models[0].Name != "Current" {
+		t.Errorf("models = %+v, want the current collection back", s.data.Models)
+	}
+	if got := dirNames(t, s.PhotoDir()); len(got) != 1 || got[0] != "current.jpg" {
+		t.Errorf("photos folder holds %v, want the current photo back", got)
+	}
+	raw, _ := os.ReadFile(s.path)
+	if !strings.Contains(string(raw), "Current") {
+		t.Error("the collection file no longer holds the current collection")
 	}
 }
