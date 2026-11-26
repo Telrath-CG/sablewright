@@ -24,6 +24,13 @@ type App struct {
 	// pageReady is set once the window's page has loaded. Until then an
 	// error from Wails is the window failing to come up at all.
 	pageReady atomic.Bool
+	// timer is the page's painting timer, as last reported.
+	timer timerTracker
+	// quitConfirmed is set once the user has agreed to quit with a timer
+	// going, so the close and quit checks that follow let it through;
+	// askingToQuit keeps that question on screen only once.
+	quitConfirmed atomic.Bool
+	askingToQuit  atomic.Bool
 	// loadErr is a non-fatal problem from startup (e.g. an unreadable data
 	// file that we moved aside) which we surface once the UI is up.
 	loadErr string

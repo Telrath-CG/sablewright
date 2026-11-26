@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -188,5 +192,36 @@ func TestMakeThumbRefusesWhatItCannotDecode(t *testing.T) {
 
 	if _, err := makeThumb(dir, "notreally.webp"); err == nil {
 		t.Error("makeThumb() on an undecodable file returned no error")
+	}
+}
+
+// A tiny file declaring an enormous picture is refused before decoding, not
+// decoded until memory runs out.
+func TestDecodeImageRefusesAnAbsurdlyLargePicture(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bomb.png")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A 1x1 PNG whose header is rewritten to claim 20000x20000 - 400
+	// megapixels in a file of under a hundred bytes.
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, image.NewGray(image.Rect(0, 0, 1, 1))); err != nil {
+		t.Fatal(err)
+	}
+	b := buf.Bytes()
+	// IHDR's data starts after the 8-byte signature, 4-byte length and type.
+	binary.BigEndian.PutUint32(b[16:], 20000)
+	binary.BigEndian.PutUint32(b[20:], 20000)
+	binary.BigEndian.PutUint32(b[29:], crc32.ChecksumIEEE(b[12:29]))
+	if _, err := f.Write(b); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	// Refused for its size, before decoding - not by the decoder running out
+	// of data after allocating 400 megapixels.
+	if _, _, err := decodeImage(path); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Errorf("decodeImage() = %v, want it refused as too large", err)
 	}
 }
