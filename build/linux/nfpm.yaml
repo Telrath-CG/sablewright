@@ -6,9 +6,9 @@
 # ${VERSION} is exported by the build workflow, which reads it out of
 # build/config.yml - the same number the app reports through App.Version - so
 # a package can never claim a version the binary inside it disagrees with.
-# ${RELEASE} is the workflow's run number on rolling builds and empty on a
-# tagged release, so two rolling builds of one version are never two
-# different packages under the same name and version.
+# ${RELEASE} is the workflow's run number, so two builds of one version are
+# never two different packages under the same name and version, and a tagged
+# release sorts above the rolling builds that came before it.
 name: sablewright
 arch: amd64
 platform: linux

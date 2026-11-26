@@ -24,10 +24,11 @@ func dialogCancelled(err error) bool {
 // attach shows a dialog over the main window, which on macOS makes it a sheet
 // on that window rather than a free-floating panel.
 func (a *App) attach() application.Window {
-	if a.win == nil {
+	w := a.win.Load()
+	if w == nil {
 		return nil
 	}
-	return a.win
+	return w
 }
 
 // openFiles asks for one or more existing files. No files and no error means
