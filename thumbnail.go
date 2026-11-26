@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	_ "image/gif"
 	"image/jpeg"
 	_ "image/png"
@@ -28,6 +29,10 @@ import (
 	"path/filepath"
 	"strings"
 )
+
+// maxDecodePixels is the largest image the app will decode: 150 megapixels,
+// well past any camera, and short of what would exhaust memory.
+const maxDecodePixels = 150_000_000
 
 // thumbMax is the long edge of a generated thumbnail. The largest a thumbnail
 // is ever drawn is the detail pane's photo strip on a wide window; 480 leaves
@@ -68,10 +73,22 @@ func makeThumb(dir, file string) (string, error) {
 		return "", err
 	}
 	defer out.Close()
-	if err := jpeg.Encode(out, small, &jpeg.Options{Quality: thumbQuality}); err != nil {
+	if err := jpeg.Encode(out, flatten(small), &jpeg.Options{Quality: thumbQuality}); err != nil {
 		return "", err
 	}
 	return name, nil
+}
+
+// flatten lays an image over white. JPEG has no transparency, and the
+// encoder reads a transparent pixel's colour as it is stored - black - so a
+// PNG cut out of its background came out as a black square. White is what
+// the photo sits on in the app and on a printed page.
+func flatten(img image.Image) image.Image {
+	b := img.Bounds()
+	out := image.NewRGBA(b)
+	draw.Draw(out, b, image.White, image.Point{}, draw.Src)
+	draw.Draw(out, b, img, b.Min, draw.Over)
+	return out
 }
 
 // decodeImage reads an image file and returns it alongside the EXIF
@@ -84,6 +101,13 @@ func decodeImage(path string) (image.Image, int, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, 1, err
+	}
+	// A small file can claim to be enormous - a PNG a few kilobytes long can
+	// declare a hundred thousand pixels a side - and decoding it would try to
+	// hold all of them in memory. Its size is read from the header first.
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(raw)); err == nil &&
+		int64(cfg.Width)*int64(cfg.Height) > maxDecodePixels {
+		return nil, 1, fmt.Errorf("%s is too large to read (%dx%d)", filepath.Base(path), cfg.Width, cfg.Height)
 	}
 	img, _, err := image.Decode(bytes.NewReader(raw))
 	if err != nil {

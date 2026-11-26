@@ -3,14 +3,14 @@ rem ===========================================================
 rem  Sablewright - build the Windows app
 rem
 rem  Double-click this. It checks for Go, installs the Wails
-rem  build tool, compiles the app, and puts the finished .exe
-rem  on your Desktop.
+rem  tool, compiles the app, and puts the finished .exe on your
+rem  Desktop.
 rem
 rem  First run takes a few minutes (it downloads Go packages).
 rem  Later runs take seconds.
 rem ===========================================================
 title Sablewright - build
-setlocal enabledelayedexpansion
+setlocal
 set "HERE=%~dp0"
 if "%HERE:~-1%"=="\" set "HERE=%HERE:~0,-1%"
 cd /d "%HERE%"
@@ -84,10 +84,34 @@ for /f "tokens=3" %%V in ('"%GOEXE%" version') do set "GOVER=%%V"
 echo         Found Go %GOVER%
 echo         at %GOEXE%
 
+rem Wails v3 needs Go 1.26 or newer. GOVER reads like go1.26.11, so the
+rem second dot-separated piece is the minor version.
+set "GOMINOR="
+for /f "tokens=2 delims=." %%M in ("%GOVER%") do set "GOMINOR=%%M"
+if not defined GOMINOR goto :oldgo
+if %GOMINOR% LSS 26 goto :oldgo
+goto :gook
+
+:oldgo
+echo.
+echo   [X] Sablewright needs Go 1.26 or newer, and this is %GOVER%.
+echo       Install the current Go from the page about to open, close this
+echo       window, then run this script again.
+echo.
+start "" https://go.dev/dl/
+pause
+exit /b 1
+
+:gook
+
 rem ---------------------------------------------------------------
-rem  2. Wails build tool
+rem  2. Wails tool
+rem     The app builds with plain `go build`. The Wails tool is used for
+rem     one step: compiling the icon, the file properties and the
+rem     manifest into the .exe. The manifest is what lets the confirm
+rem     dialogs show their own button labels.
 rem ---------------------------------------------------------------
-echo   [2/4] Installing the Wails build tool...
+echo   [2/4] Installing the Wails tool...
 
 rem work out where `go install` puts binaries
 set "GOBIN="
@@ -98,12 +122,12 @@ if not defined GOBIN (
 set "PATH=%GOBIN%;%PATH%"
 
 rem Always installed, even over an existing copy: `go install` of a pinned
-rem version is quick when it's already there, and an older Wails left over
+rem version is quick when it's already there, and an older one left over
 rem from a previous build would otherwise be used without a word - so a
 rem failed install stops here rather than falling back on it.
-"%GOEXE%" install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+"%GOEXE%" install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
 if errorlevel 1 goto :wails_failed
-if not exist "%GOBIN%\wails.exe" goto :wails_failed
+if not exist "%GOBIN%\wails3.exe" goto :wails_failed
 goto :wails_ready
 
 :wails_failed
@@ -119,9 +143,11 @@ echo         Ready.
 
 rem ---------------------------------------------------------------
 rem  3. Dependencies
+rem     download, not tidy: go.mod and go.sum are committed and say
+rem     exactly what to fetch, and a build shouldn't rewrite them.
 rem ---------------------------------------------------------------
 echo   [3/4] Fetching Go packages (slow the first time)...
-"%GOEXE%" mod tidy
+"%GOEXE%" mod download
 if errorlevel 1 (
     echo.
     echo   [X] Could not download the Go packages. Check your internet
@@ -134,40 +160,73 @@ echo         Done.
 
 rem ---------------------------------------------------------------
 rem  4. Build
-rem     -webview2 embed bundles the WebView2 bootstrapper, so the app
-rem     also works on older Windows 10 machines that lack the runtime.
 rem ---------------------------------------------------------------
 echo   [4/4] Building the app...
 
-rem     The version comes from wails.json rather than being repeated here, and
-rem     the commit is stamped alongside it so a build can say what it came
-rem     from. Both are optional - git in particular won't be installed on a
-rem     machine that only ever downloads this repo as a zip - and without them
-rem     the app simply calls itself a dev build.
+rem     The version comes from build\config.yml rather than being repeated
+rem     here, and the commit is stamped alongside it so a build can say what
+rem     it came from. Both are optional - git in particular won't be
+rem     installed on a machine that only ever downloads this repo as a zip -
+rem     and without them the app simply calls itself a dev build.
+rem     PowerShell writes the version to a file rather than being run inside
+rem     a for /f, where cmd would have to parse its quotes and brackets too.
 set "VERSION="
-for /f "delims=" %%V in ('powershell -NoProfile -Command "(Get-Content 'wails.json' -Raw ^| ConvertFrom-Json).info.productVersion" 2^>nul') do set "VERSION=%%V"
+set "VERFILE=%TEMP%\sablewright-version.txt"
+del /q "%VERFILE%" >nul 2>&1
+powershell -NoProfile -Command "$in = $false; foreach ($l in Get-Content 'build\config.yml') { if ($l -match '^info:') { $in = $true; continue }; if ($l -match '^[^\s#]') { $in = $false }; if ($in -and $l -match '^\s+version:') { ($l -split ':',2)[1].Split('#')[0].Trim().Trim([char]34); break } }" > "%VERFILE%" 2>nul
+if exist "%VERFILE%" set /p VERSION=<"%VERFILE%"
 set "COMMIT="
 for /f "delims=" %%C in ('git rev-parse --short HEAD 2^>nul') do set "COMMIT=%%C"
 
-set "LDF=-w -s"
+set "LDF=-w -s -H windowsgui"
 if defined VERSION set "LDF=%LDF% -X main.version=%VERSION%"
 if defined COMMIT set "LDF=%LDF% -X main.commit=%COMMIT%"
 
+rem The file properties carry the version too. They are written to a copy in
+rem TEMP so the tracked build\windows\info.json stays as it is.
+set "INFO=%TEMP%\sablewright-info.json"
+set "STAMP=%VERSION%"
+if not defined STAMP set "STAMP=0.0.0"
+del /q "%INFO%" >nul 2>&1
+rem WriteAllText rather than Set-Content: it writes no byte-order mark, which
+rem the JSON reader in the Wails tool would refuse. The path and version are
+rem read from the environment rather than pasted into the command, so a TEMP
+rem folder with an apostrophe in it (C:\Users\O'Brien) can't break it.
+powershell -NoProfile -Command "[IO.File]::WriteAllText($env:INFO, ((Get-Content 'build\windows\info.json' -Raw) -replace '0\.0\.0', $env:STAMP))"
+if errorlevel 1 (
+    echo.
+    echo   [X] Could not prepare the file properties - the error is above.
+    echo.
+    pause
+    exit /b 1
+)
+
+"%GOBIN%\wails3.exe" generate syso -arch amd64 -icon build\windows\icon.ico -manifest build\windows\wails.exe.manifest -info "%INFO%" -out wails_windows_amd64.syso
+if errorlevel 1 (
+    echo.
+    echo   [X] Could not prepare the Windows resources - the error is above.
+    echo.
+    pause
+    exit /b 1
+)
+
 echo.
-"%GOBIN%\wails.exe" build -platform windows/amd64 -webview2 embed -ldflags "%LDF%"
+if not exist "%HERE%\build\bin" mkdir "%HERE%\build\bin"
+set "CGO_ENABLED=0"
+"%GOEXE%" build -tags production -trimpath -buildvcs=false -ldflags "%LDF%" -o build\bin\Sablewright.exe .
+set "BUILD_ERR=%ERRORLEVEL%"
+del /q wails_windows_amd64.syso >nul 2>&1
 echo.
 
-set "OUT="
-for %%F in ("%HERE%\build\bin\*.exe") do set "OUT=%%~fF"
-
-if not defined OUT (
-    echo   [X] The build finished but produced no .exe.
+if not "%BUILD_ERR%"=="0" (
+    echo   [X] The build failed.
     echo       Scroll up - the compiler error will be just above.
     echo.
     pause
     exit /b 1
 )
 
+set "OUT=%HERE%\build\bin\Sablewright.exe"
 echo   Built: %OUT%
 
 rem copy it somewhere obvious
@@ -181,8 +240,10 @@ if errorlevel 1 (
 
 echo.
 echo   ============================================================
-echo    Done. It's a single self-contained .exe - no installer,
-echo    nothing to set up. Move it anywhere; it'll still work.
+echo    Done. It's a single .exe - no installer, nothing to set up.
+echo    Move it anywhere; it'll still work. It uses Microsoft's
+echo    WebView2, which Windows 11 always has; on a Windows 10 PC
+echo    without it, use the installer from the releases page instead.
 echo   ============================================================
 echo.
 echo   Starting it now...

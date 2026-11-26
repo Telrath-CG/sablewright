@@ -533,7 +533,8 @@ select:focus { border-color: var(--accent); }
 .wrow .nm:hover { color: var(--accent); }
 .wrow .code { color: var(--faint); font-size: 11px; }
 .wrow .meta { color: var(--muted); font-size: 12px; flex: 1; }
-.wrow .x { color: var(--danger); cursor: pointer; font-size: 12px; }
+.wrow .x { color: var(--danger); cursor: pointer; font-size: 12px;
+  background: none; border: 0; padding: 0; font-family: inherit; }
 .wrow .btn.small { padding: 4px 10px; font-size: 12px; }
 .row .count { text-align: right; color: var(--muted); }
 .row .star { color: var(--star); }
@@ -557,11 +558,13 @@ select:focus { border-color: var(--accent); }
 }
 .photo .ph { display: grid; place-items: center; color: var(--faint); font-size: 22px; }
 .photo .cap { margin-top: 5px; display: flex; align-items: center; gap: 5px; }
-.photo .x { margin-left: auto; color: var(--danger); cursor: pointer; font-size: 12px; }
+.photo .x { margin-left: auto; color: var(--danger); cursor: pointer; font-size: 12px;
+  background: none; border: 0; padding: 0; font-family: inherit; }
 /* Picking the cover sits with the photo it applies to rather than in a
    dropdown elsewhere, and the filled star is the one currently standing in
    for the mini out in the list. */
-.photo .pick { margin-left: auto; color: var(--faint); cursor: pointer; font-size: 12px; }
+.photo .pick { margin-left: auto; color: var(--faint); cursor: pointer; font-size: 12px;
+  background: none; border: 0; padding: 0; font-family: inherit; }
 .photo .pick.on { color: var(--star); }
 .photo .pick + .x { margin-left: 0; }
 .photo .is-cover { color: var(--star); font-size: 11px; }
@@ -751,9 +754,13 @@ select:focus { border-color: var(--accent); }
 }
 .timeline .what { color: var(--text-2); line-height: 1.55; font-size: 13px; }
 .timeline .acts { margin-left: auto; display: flex; gap: 10px; opacity: 0; }
-.timeline.editable .entry:hover .acts { opacity: 1; }
-.timeline .acts a { color: var(--accent); cursor: pointer; font-weight: 600; }
-.timeline .acts a.s-del { color: var(--danger); }
+/* Shown on hover, and while one of them has the keyboard - otherwise tabbing
+   onto an invisible button gives no sign of where the focus went. */
+.timeline.editable .entry:hover .acts,
+.timeline.editable .entry:focus-within .acts { opacity: 1; }
+.timeline .acts button { background: none; border: 0; padding: 0; font: inherit;
+  color: var(--accent); cursor: pointer; font-weight: 600; }
+.timeline .acts button.s-del { color: var(--danger); }
 
 .log-form {
   background: var(--panel); border: 1px solid var(--border);
@@ -794,4 +801,26 @@ select:focus { border-color: var(--accent); }
   .split .list-pane { flex: 1 1 auto; max-width: none; width: 100%; }
   .tip-grid { grid-template-columns: 1fr; }
   .two-col { grid-template-columns: 1fr; }
+}
+
+/* Keyboard focus, drawn wherever the keyboard lands - buttons, the sidebar,
+   links - and only for the keyboard: a mouse click draws nothing. Text fields
+   keep their own accent border instead. */
+button:focus-visible, a:focus-visible, [tabindex]:focus-visible, .nav li:focus-visible,
+input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* There for a screen reader, not drawn. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* A drop zone while pictures are dragged over it. */
+.file-drop-target-active {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  border-radius: 8px;
 }

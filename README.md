@@ -19,10 +19,18 @@ to take. Every version carries the same set of downloads:
 | --- | --- |
 | Windows | `Sablewright-Windows.exe`, or `Sablewright-Windows-installer.exe` to install it properly |
 | macOS | `Sablewright-macOS.dmg` — **Apple Silicon only** |
-| Debian, Ubuntu | `sablewright_<version>_amd64.deb` |
-| Fedora, RHEL, openSUSE | `sablewright-<version>-1.x86_64.rpm` |
-| Arch | `sablewright-<version>-1-x86_64.pkg.tar.zst` |
+| Debian, Ubuntu | `sablewright_<version>-<build>_amd64.deb` |
+| Fedora 40 or newer | `sablewright-<version>-<build>.x86_64.rpm` |
+| Arch | `sablewright-<version>-<build>-x86_64.pkg.tar.zst` |
 | Other Linux | `Sablewright-Linux`, a bare binary |
+
+The `<build>` in the Linux package names is the number of the build that made
+them. It goes up with every build, so a newer download installs over an older
+one, including a release over a `latest` build of the same version.
+
+**Windows** — the bare `.exe` runs on Microsoft's WebView2, which Windows 11
+always has and most Windows 10 PCs have picked up through updates. The
+installer adds WebView2 if it's missing, so take that one if you're unsure.
 
 Every merge to `main` also refreshes the [`latest`
 prerelease](https://github.com/Telrath-CG/sablewright/releases/tag/latest) with
@@ -30,7 +38,8 @@ a build of whatever is on `main` right now. It holds the same set of downloads
 and is replaced wholesale by the next merge, so take it only to try something
 that hasn't been released yet.
 
-**macOS** supports Apple Silicon (M1 and later) and nothing else. No Intel
+**macOS** needs macOS 12 Monterey or newer, on Apple Silicon (M1 and later)
+and nothing else. No Intel
 build is produced, and the one inside the disk image will not run on an Intel
 Mac. The app isn't signed or notarized either, so Gatekeeper blocks the first
 launch: open the disk image, drag Sablewright into the Applications folder
@@ -44,19 +53,38 @@ fits — they install to `/usr/bin` and add a menu entry, rather than leaving a
 file to keep track of:
 
 ```
-sudo apt install ./sablewright_1.2.1_amd64.deb
-sudo dnf install ./sablewright-1.2.1-1.x86_64.rpm
-sudo pacman -U sablewright-1.2.1-1-x86_64.pkg.tar.zst
+sudo apt install ./sablewright_2.0.0-<build>_amd64.deb
+sudo dnf install ./sablewright-2.0.0-<build>.x86_64.rpm
+sudo pacman -U sablewright-2.0.0-<build>-x86_64.pkg.tar.zst
 ```
 
-All three depend on GTK 3 and WebKit2GTK 4.1, which current distributions ship
-as standard, and the package manager will say so plainly if either is absent.
+All three depend on GTK 4 and WebKitGTK 6.0, which Ubuntu 24.04, Debian 13 and
+newer releases ship as standard, and the package manager will say so plainly
+if either is absent. Older releases such as Ubuntu 22.04 and Debian 12 don't
+have them; stay on Sablewright 1.2.x there.
 
 The bare binary is the fallback for distributions none of those cover, and for
 running the app without installing it. It declares no dependencies, so a
 missing library surfaces as a linker error rather than a readable message —
 prefer a package wherever one fits. It also arrives without the executable
 bit: `chmod +x Sablewright-Linux`.
+
+### Upgrading from 1.x
+
+- **Your collection comes with you.** It stays in the same data folder, and
+  2.0 opens it as it is.
+- **Quit 1.x before starting 2.0.** 1.x doesn't stop a second copy from
+  running, and 2.0 can't see a 1.x that is still open, so one left open would
+  keep saving over 2.0's changes.
+- **On Windows**, if you installed 1.x with its installer, the 2.0 installer
+  replaces it in place. A 1.x `.exe` kept somewhere else is simply left where
+  it is.
+- **On Linux**, 2.0 needs Ubuntu 24.04, Debian 13 or newer. Stay on 1.2.x on
+  older releases.
+- **The light/dark choice** may reset once, since the window's storage moved.
+- **Going back** to 1.2.x works, but 1.x doesn't know about the trash for
+  deleted photos: it drops those entries the next time it saves, after which
+  photos deleted in 2.0 can't be put back.
 
 ---
 
@@ -80,10 +108,19 @@ project across every mini at once, or ungroups them without deleting anything.
 
 **Painting log** — the point of this is to record what actually happened at the
 desk. Open a mini, go to the *Painting log* tab, and add a dated entry with an
-optional number of minutes: *"Nuln Oil recess shading done, started edge
-highlights."* Entries show newest-first as a timeline on the mini's detail
-panel, and the total time is tallied per mini and across the collection. If a
-mini has no start date, the earliest log entry becomes it.
+optional time — `90`, `1h 30m` and `1:30` all work: *"Nuln Oil recess shading
+done, started edge highlights."* Entries show newest-first as a timeline on the
+mini's detail panel, and the total time is tallied per mini and across the
+collection. If a mini has no start date, the earliest log entry becomes it. An
+entry written but not yet added is saved along with the mini, and closing the
+dialog with one still in the form asks first.
+
+**Session timer** — *Start timer* on a mini's detail panel counts while you
+paint. It sits in the sidebar while you move around the app, pauses and
+resumes, and *Stop* opens the log with the minutes filled in. On macOS it also
+shows in the menu bar, with Pause, Resume and Stop in its menu. The timer is
+kept in memory only, so closing or quitting Sablewright with one going asks
+first rather than losing the time.
 
 **Paint Inventory** — the rack comes stocked with 1,419 paints across six
 ranges, so you tick off what you own rather than typing it all in:
@@ -148,8 +185,10 @@ recipes use it.
 
 **Photos** — added through a native file picker and *copied* into the app's own
 folder, so moving or deleting the originals later doesn't break anything.
-Click a photo to open it full size. PNG, JPEG, GIF, BMP and WebP are accepted —
-the formats every platform can draw.
+Click a photo to open it full size, or drop pictures from your file manager
+straight onto a mini's photos — on its detail panel or its *Photos* tab — to
+add them as progress shots. PNG, JPEG, GIF, BMP and WebP are accepted — the
+formats every platform can draw.
 
 A thumbnail is generated on import and is what the app actually draws, so a
 mini with a dozen progress shots costs a fraction of the memory it used to;
@@ -204,16 +243,37 @@ is copied, since the photos are large and don't change; a manual backup is
 still the one that carries everything.
 
 Only one copy of Sablewright runs at a time. Launching it again brings the open
-window forward, since two copies would each save over the other's changes.
+window forward, since two copies would each save over the other's changes. The
+window opens where you last left it, at the same size; if that was on a screen
+that's no longer connected, or is now too big for the screens there are, it
+opens centred instead. (On Wayland the desktop chooses where windows go, so
+only the size comes back.)
 
 **Deleting a mini** puts it in the trash for 30 days rather than destroying
 it, and the toast offers *Undo* on the spot. Notes and a status can be typed
 again; a photo of a mini part-painted three months ago can't be retaken. It
 leaves the app immediately either way — nothing reads the trash — and after
-30 days it and its photos go for good.
+30 days it and its photos go for good. Deleting a single photo or a log entry
+offers the same *Undo*, and a deleted photo's file is kept for the same 30
+days.
 
-**Keyboard** — on the Models screen, ↑ and ↓ walk the list and Enter opens
-the highlighted mini for editing.
+**Keyboard** — Tab reaches the sidebar, and Enter or Space opens a screen. On
+the Models screen, ↑ and ↓ walk the list and Enter opens the highlighted mini
+for editing. Shortcuts use ⌘ on macOS and Ctrl elsewhere:
+
+| Shortcut | Does |
+| --- | --- |
+| ⌘N / Ctrl+N | Add a mini |
+| ⌘E / Ctrl+E | Export the mini selected on the Models screen |
+| ⌘F / Ctrl+F | Jump to the search box, on the screens that have one |
+| ⌘1 – ⌘7 / Ctrl+1 – Ctrl+7 | Dashboard, Models, Projects, Paint Inventory, Wishlist, Technique Notes, Time at the Desk |
+
+On macOS the same commands are in the File and View menus, with Back Up,
+Import Backup and Open Data Folder.
+
+**Right-click** a mini in the list, a photo on its detail panel, or a paint in
+the inventory for the things you'd otherwise open it to do: edit, export, open
+full size, use as the cover, mark owned, add to the wishlist, or delete.
 
 ### Why JSON and not SQLite
 
@@ -232,16 +292,20 @@ it.
 
 ### Prerequisites
 
-Every platform needs [Go 1.26 or newer](https://go.dev/dl/) and the Wails CLI:
+Every platform needs [Go 1.26 or newer](https://go.dev/dl/). Distribution
+packages of Go are often older than that, so take it from go.dev if yours is.
+
+The app is built with plain `go build`. The [Wails](https://v3.wails.io) CLI is
+only a tool here — for the Windows resources and installer, and the macOS disk
+image — and is pinned to the same version as the library:
 
 ```
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
 ```
 
-**There is no Node toolchain to install.** Wails projects normally want npm,
-but this frontend is plain HTML, CSS and JavaScript committed under
-`frontend/dist`, so the frontend build hooks in `wails.json` are empty and
-there is nothing to install or bundle.
+**There is no Node toolchain to install.** The frontend is plain HTML, CSS and
+JavaScript committed under `frontend/dist`, so there is nothing to install or
+bundle.
 
 Past that, each platform needs its own native pieces.
 
@@ -258,25 +322,18 @@ xcode-select --install
 brew install go
 ```
 
-**Linux** — GTK 3 and WebKit2GTK development headers, plus a C compiler. On
-Debian and Ubuntu:
+**Linux** — GTK 4 and WebKitGTK 6.0 development headers, plus a C compiler.
+These first shipped in Ubuntu 24.04 and Debian 13; older releases can't build
+or run Sablewright 2. On Debian and Ubuntu:
 
 ```
-sudo apt install build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev
+sudo apt install build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev
 ```
 
-WebKit2GTK comes in a 4.0 and a 4.1 flavor and they are not interchangeable:
-building against 4.1 needs `-tags webkit2_41`. Releases target 4.1, because
-4.0 is gone from Ubuntu 24.04, Debian 13 and Arch, and a package built against
-it would be uninstallable on most current systems.
-`build-mac-or-linux.sh` detects which of the two you have and picks the tag to
-match. CI still runs on `ubuntu-22.04` — for its older glibc, which is what
-lets one binary run on old distributions as well as new — but installs the 4.1
-headers there rather than the 4.0 that image defaults to.
+On Fedora: `sudo dnf install gtk4-devel webkitgtk6.0-devel`.
 
-**Windows** — nothing beyond Go. The WebView2 runtime ships with Windows 11 and
-is embedded into the binary at build time regardless. Building the *installer*
-additionally needs [NSIS](https://nsis.sourceforge.io) on `PATH`:
+**Windows** — Go and the Wails CLI; no C compiler. Building the *installer*
+also needs [NSIS](https://nsis.sourceforge.io) on `PATH`:
 
 ```
 winget install NSIS.NSIS
@@ -284,65 +341,89 @@ winget install NSIS.NSIS
 
 ### Building
 
-```
-wails dev        # run with live reload
-wails build      # binary into build/bin
-```
+The scripts build the app the same way the release build in
+`.github/workflows/build.yml` does: `build-mac-or-linux.sh` on macOS and Linux,
+which on macOS also makes the signed `.app` and the disk image, and
+`Build Windows app.bat` on Windows, which makes the `.exe`. The Windows
+installer and the Linux packages are left to CI, and to the commands below.
 
-The Windows installer is a separate invocation:
-
-```
-wails build -platform windows/amd64 -webview2 embed -nsis
-```
-
-The macOS release is an Apple Silicon build wrapped in a disk image. Wails v2
-has no packaging target for that, so CI hands the finished bundle to
-[create-dmg](https://github.com/create-dmg/create-dmg):
+The app itself, on any platform:
 
 ```
-brew install create-dmg
-wails build -platform darwin/arm64 -ldflags "-w -s"
+go build -tags production -trimpath -o build/bin/Sablewright .
 ```
 
-`build-mac-or-linux.sh` runs the same build and produces the `.dmg` alongside
-the `.app` whenever create-dmg is installed, and just the `.app` when it isn't.
+`go run .` runs it straight from the source for a quick look; there is no live
+reload, so restart it after a change.
 
-The Linux packages come from [nfpm](https://github.com/goreleaser/nfpm), which
-wraps the finished binary — one config in `build/linux/nfpm.yaml` covering all
-three formats, with no root and no containers involved:
+**Windows** needs its icon, file properties and manifest compiled into the
+`.exe` first. The manifest matters: it is what lets the confirm dialogs show
+their own button labels rather than a fixed Yes and No.
+
+```
+wails3 generate syso -arch amd64 -icon build/windows/icon.ico -manifest build/windows/wails.exe.manifest -info build/windows/info.json -out wails_windows_amd64.syso
+go build -tags production -trimpath -ldflags "-H windowsgui" -o build/bin/Sablewright.exe .
+```
+
+`build/windows/info.json` holds `0.0.0` where the version goes; CI and the
+build script put the real one into a copy before this step, and a build
+straight from the file reports 0.0.0 in its file properties.
+
+The installer bundles Microsoft's WebView2 bootstrapper, so it also works on a
+PC without the WebView2 runtime; the bare `.exe` needs the runtime already
+there, which Windows 11 always has:
+
+```
+wails3 generate webview2bootstrapper -dir build/windows/nsis
+makensis -DARG_WAILS_AMD64_BINARY=%CD%\build\bin\Sablewright.exe -DINFO_PRODUCTVERSION=2.0.0 build\windows\nsis\project.nsi
+```
+
+**macOS** releases are an Apple Silicon `.app` in a disk image. The bundle is
+put together from `build/darwin` — the binary, `Info.plist` and the icon — and
+ad-hoc signed; `build-mac-or-linux.sh` shows the steps. The disk image is then:
+
+```
+wails3 tool package --format dmg --name Sablewright --out build/bin --volume-icon build/darwin/icons.icns
+```
+
+The **Linux** packages come from [nfpm](https://github.com/goreleaser/nfpm),
+which wraps the finished binary — one config in `build/linux/nfpm.yaml`
+covering all three formats, with no root and no containers involved:
 
 ```
 go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.43.0
-export VERSION=1.2.1
+export VERSION=2.0.0 RELEASE=1
 nfpm pkg -f build/linux/nfpm.yaml --packager deb       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager rpm       --target build/bin/
 nfpm pkg -f build/linux/nfpm.yaml --packager archlinux --target build/bin/
 ```
 
-The dependency lists differ per format in ways worth knowing about. The `.deb`
-spells out `libgtk-3-0 | libgtk-3-0t64`, because Ubuntu 24.04's 64-bit `time_t`
-transition renamed that package. The `.rpm` requires sonames rather than
-package names, since Fedora and openSUSE disagree on what to call WebKit while
-providing the same soname. Only the `.deb` and `.rpm` carry a glibc floor;
-Arch is rolling, so its glibc is never older than the build's.
+The `.rpm` requires sonames rather than package names, since the RPM
+distributions disagree on what to call WebKit while providing the same
+soname. Only the `.deb` and `.rpm` carry a glibc floor (2.39, from the Ubuntu
+24.04 build); Arch is rolling, so its glibc is never older than the build's.
+CI installs the `.deb` on Ubuntu 24.04 after building it, which proves the
+Debian and Ubuntu package names; the `.rpm` and Arch names follow those
+distributions' own packaging but aren't installed anywhere by CI.
 
 ### Version numbers
 
-`productVersion` in `wails.json` is the only place the version is written
-down. Wails already reads it there for the Windows file properties; the build
-scripts read the same field and hand it to the linker along with the short
-commit hash:
+`info.version` in `build/config.yml` is the only place the version is written
+down. CI and the build scripts read it there, hand it to the linker along with
+the short commit hash, and stamp it into the macOS `Info.plist`, the Windows
+file properties and installer, and the Linux packages:
 
 ```
--ldflags "-w -s -X main.version=1.2.1 -X main.commit=73ec59c"
+-ldflags "-w -s -X main.version=2.0.0 -X main.commit=73ec59c"
 ```
 
 The sidebar shows whatever was stamped in, which is why it reports the commit
 as well as the number: every merge to `main` replaces the same rolling
 release, so two downloads a week apart both call themselves the same version
 and only the hash says which one a bug report is about. A build with nothing
-stamped in says `dev` — that's `wails dev` and a plain `go build`. Releasing a
-new version means editing `wails.json` and nothing else.
+stamped in says `dev` — that's `go run .` and a plain `go build`. Releasing a
+new version means editing `build/config.yml` and nothing else; a pushed tag
+that doesn't match it fails the build.
 
 ## License
 

@@ -8,23 +8,18 @@
        its own auto-darkening filter - which turns every white panel grey.
        The app ships both palettes, so it claims both. -->
   <meta name="color-scheme" content="light dark" />
+  <!-- What the page may load, and from where. Everything comes from the app
+       itself: no request leaves the machine, no inline or injected script
+       runs, and no page can be framed in - frames being the one route Wails
+       does not guard on Linux. Inline style attributes stay allowed because
+       app.js's templates use them; the data: images are the icons in
+       style.css. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
   <title>Sablewright</title>
 
-  <!-- Set the theme before the stylesheet paints. Doing this from app.js
-       instead would show a flash of the light palette on every launch, since
-       that runs at the end of the body. Falls back to the OS preference when
-       the user has never chosen, and stays silent if storage is unavailable. -->
-  <script>
-    (function () {
-      try {
-        var t = localStorage.getItem("sablewright.theme");
-        if (t !== "light" && t !== "dark") {
-          t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-        }
-        document.documentElement.setAttribute("data-theme", t);
-      } catch (e) { /* no storage: the CSS media query still applies */ }
-    })();
-  </script>
+  <!-- Before the stylesheet, so the first paint is already in the right theme. -->
+  <script src="theme.js"></script>
 
   <link rel="stylesheet" href="style.css" />
 </head>
@@ -48,13 +43,15 @@
       </div>
 
       <ul class="nav" id="nav">
-        <li data-screen="dashboard" class="active"><i>■</i><span>Dashboard</span></li>
-        <li data-screen="models"><i>▤</i><span>Models</span></li>
-        <li data-screen="projects"><i>⌸</i><span>Projects</span></li>
-        <li data-screen="paints"><i>●</i><span>Paint Inventory</span></li>
-        <li data-screen="wishlist"><i>★</i><span>Wishlist</span></li>
-        <li data-screen="tips"><i>✎</i><span>Technique Notes</span></li>
-        <li data-screen="time"><i>◷</i><span>Time at the Desk</span></li>
+        <!-- Focusable and announced as buttons, so the screens can be reached
+             from the keyboard; app.js answers Enter and Space on them. -->
+        <li data-screen="dashboard" class="active" tabindex="0" role="button" aria-current="page"><i aria-hidden="true">■</i><span>Dashboard</span></li>
+        <li data-screen="models" tabindex="0" role="button"><i aria-hidden="true">▤</i><span>Models</span></li>
+        <li data-screen="projects" tabindex="0" role="button"><i aria-hidden="true">⌸</i><span>Projects</span></li>
+        <li data-screen="paints" tabindex="0" role="button"><i aria-hidden="true">●</i><span>Paint Inventory</span></li>
+        <li data-screen="wishlist" tabindex="0" role="button"><i aria-hidden="true">★</i><span>Wishlist</span></li>
+        <li data-screen="tips" tabindex="0" role="button"><i aria-hidden="true">✎</i><span>Technique Notes</span></li>
+        <li data-screen="time" tabindex="0" role="button"><i aria-hidden="true">◷</i><span>Time at the Desk</span></li>
       </ul>
 
       <div class="nav-footer">
@@ -79,7 +76,14 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
+  <!-- What the toast says, read out by a screen reader. A separate element
+       because the toast is hidden between messages, and a change inside a
+       hidden element often isn't announced. -->
+  <div class="sr-only" id="announce" role="status" aria-live="polite"></div>
 
+  <!-- The Wails runtime is served by the app but not injected into the page,
+       so it is loaded here; it defines window.wails, which app.js waits for. -->
+  <script type="module" src="/wails/runtime.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
