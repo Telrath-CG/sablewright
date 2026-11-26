@@ -114,7 +114,8 @@ echo
 if [ "$(uname -s)" = "Darwin" ]; then
   # 12.0 is the oldest macOS Wails v3 supports.
   export MACOSX_DEPLOYMENT_TARGET=12.0
-  export CGO_CFLAGS=-mmacosx-version-min=12.0 CGO_LDFLAGS=-mmacosx-version-min=12.0
+  # Go's default CFLAGS are -O2 -g, and setting the variable replaces them.
+  export CGO_CFLAGS="-O2 -g -mmacosx-version-min=12.0" CGO_LDFLAGS=-mmacosx-version-min=12.0
 fi
 go build -tags production -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o build/bin/Sablewright . \
   || fail "The build failed - the compiler error is above."
@@ -129,15 +130,19 @@ if [ "$(uname -s)" = "Darwin" ]; then
   # being called damaged.
   say "      Assembling Sablewright.app..."
   APP=build/bin/Sablewright.app
-  rm -rf "$APP"
-  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-  mv build/bin/Sablewright "$APP/Contents/MacOS/Sablewright"
-  cp build/darwin/Info.plist "$APP/Contents/Info.plist"
+  # Each step is checked: a bundle missing its binary or its Info.plist would
+  # still sign, and be reported as built.
+  rm -rf "$APP" || fail "Could not clear out the old app bundle."
+  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" || fail "Could not create the app bundle."
+  mv build/bin/Sablewright "$APP/Contents/MacOS/Sablewright" || fail "Could not put the app into its bundle."
+  cp build/darwin/Info.plist "$APP/Contents/Info.plist" || fail "Could not copy Info.plist."
   if [ -n "$VERSION" ]; then
-    plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
-    plutil -replace CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist"
+    plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist" \
+      && plutil -replace CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist" \
+      || fail "Could not stamp the version into Info.plist."
   fi
-  cp build/darwin/icons.icns LICENSE THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/"
+  cp build/darwin/icons.icns LICENSE THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/" \
+    || fail "Could not copy the icon and license files into the bundle."
   codesign --force --deep --sign - \
     --identifier "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" "$APP" \
     || fail "Could not sign the app bundle."
@@ -145,12 +150,18 @@ if [ "$(uname -s)" = "Darwin" ]; then
 
   say "      Packaging a disk image..."
   rm -f build/bin/Sablewright.dmg
-  if "$GOBIN/wails3" tool package --format dmg --name Sablewright --out build/bin >/dev/null 2>&1 \
+  DMGLOG="$(mktemp)"
+  if "$GOBIN/wails3" tool package --format dmg --name Sablewright --out build/bin \
+       --volume-icon build/darwin/icons.icns >"$DMGLOG" 2>&1 \
      && [ -f build/bin/Sablewright.dmg ]; then
     DMG="build/bin/Sablewright.dmg"
   else
-    say "      (No disk image was made - the .app below is fine.)"
+    # Not fatal - the .app is what you want for trying your own build - but
+    # say why, rather than hiding it.
+    say "      No disk image was made (the .app below is fine). The tool said:"
+    sed 's/^/        /' "$DMGLOG"
   fi
+  rm -f "$DMGLOG"
   echo
 fi
 

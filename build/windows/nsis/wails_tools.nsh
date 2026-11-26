@@ -20,7 +20,7 @@
     !define INFO_COPYRIGHT ""
 !endif
 !ifndef PRODUCT_EXECUTABLE
-    !define PRODUCT_EXECUTABLE "Sablewright.exe"
+    !define PRODUCT_EXECUTABLE "${INFO_PROJECTNAME}.exe"
 !endif
 !ifndef UNINST_KEY_NAME
     !define UNINST_KEY_NAME "${INFO_COMPANYNAME}${INFO_PRODUCTNAME}"

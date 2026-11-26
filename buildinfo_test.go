@@ -117,20 +117,27 @@ func TestBuildFilesAgreeWithConfig(t *testing.T) {
 		t.Errorf("info.json fixed versions = %v, want the 0.0.0 placeholders CI stamps", winfo.Fixed)
 	}
 
-	// The installer's names also decide its uninstall entry and install
-	// folder, so they must stay what 1.x installed under for 2.x to replace
-	// it rather than install a second copy beside it.
+	// The installer's names decide its uninstall entry, its install folder
+	// and the file it installs, so they must stay what 1.x installed under
+	// (the Wails v2 template's defaults) for 2.x to replace it in place rather
+	// than install a second copy beside it.
 	nsh := readFile(t, "build", "windows", "nsis", "wails_tools.nsh")
 	for name, want := range map[string]string{
-		"INFO_COMPANYNAME":   info["companyName"],
-		"INFO_PRODUCTNAME":   info["productName"],
-		"INFO_PROJECTNAME":   "sablewright",
-		"PRODUCT_EXECUTABLE": "Sablewright.exe",
+		"INFO_COMPANYNAME":    info["companyName"],
+		"INFO_PRODUCTNAME":    info["productName"],
+		"INFO_PROJECTNAME":    "sablewright",
+		"PRODUCT_EXECUTABLE":  "${INFO_PROJECTNAME}.exe",
+		"UNINST_KEY_NAME":     "${INFO_COMPANYNAME}${INFO_PRODUCTNAME}",
+		"WAILS_INSTALL_SCOPE": "machine",
 	} {
 		re := regexp.MustCompile(`!define ` + name + ` "([^"]*)"`)
 		m := re.FindStringSubmatch(nsh)
 		if m == nil || m[1] != want {
 			t.Errorf("wails_tools.nsh %s = %v, want %q", name, m, want)
 		}
+	}
+	nsi := readFile(t, "build", "windows", "nsis", "project.nsi")
+	if !strings.Contains(nsi, `InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"`) {
+		t.Error("project.nsi no longer installs to $PROGRAMFILES64\\<company>\\<product>, where 1.x is")
 	}
 }

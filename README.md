@@ -19,9 +19,13 @@ to take. Every version carries the same set of downloads:
 | --- | --- |
 | Windows | `Sablewright-Windows.exe`, or `Sablewright-Windows-installer.exe` to install it properly |
 | macOS | `Sablewright-macOS.dmg` — **Apple Silicon only** |
-| Debian, Ubuntu | `sablewright_<version>_amd64.deb` |
-| Fedora, RHEL, openSUSE | `sablewright-<version>-1.x86_64.rpm` |
-| Arch | `sablewright-<version>-1-x86_64.pkg.tar.zst` |
+| Debian, Ubuntu | `sablewright_<version>-<build>_amd64.deb` |
+| Fedora, RHEL, openSUSE | `sablewright-<version>-<build>.x86_64.rpm` |
+| Arch | `sablewright-<version>-<build>-x86_64.pkg.tar.zst` |
+
+The `<build>` in the Linux package names is the number of the build that made
+them. It only ever goes up, so a newer download always installs over an older
+one, including a release over a `latest` build of the same version.
 | Other Linux | `Sablewright-Linux`, a bare binary |
 
 **Windows** — the bare `.exe` runs on Microsoft's WebView2, which Windows 11
@@ -48,9 +52,9 @@ fits — they install to `/usr/bin` and add a menu entry, rather than leaving a
 file to keep track of:
 
 ```
-sudo apt install ./sablewright_1.2.1_amd64.deb
-sudo dnf install ./sablewright-1.2.1-1.x86_64.rpm
-sudo pacman -U sablewright-1.2.1-1-x86_64.pkg.tar.zst
+sudo apt install ./sablewright_2.0.0-*_amd64.deb
+sudo dnf install ./sablewright-2.0.0-*.x86_64.rpm
+sudo pacman -U sablewright-2.0.0-*-x86_64.pkg.tar.zst
 ```
 
 All three depend on GTK 4 and WebKitGTK 6.0, which Ubuntu 24.04, Debian 13 and
@@ -287,9 +291,11 @@ winget install NSIS.NSIS
 
 ### Building
 
-The scripts do everything below for you: `build-mac-or-linux.sh` on macOS and
-Linux, `Build Windows app.bat` on Windows. They run the same steps as the
-release build in `.github/workflows/build.yml`.
+The scripts build the app the same way the release build in
+`.github/workflows/build.yml` does: `build-mac-or-linux.sh` on macOS and Linux,
+which on macOS also makes the signed `.app` and the disk image, and
+`Build Windows app.bat` on Windows, which makes the `.exe`. The Windows
+installer and the Linux packages are left to CI, and to the commands below.
 
 The app itself, on any platform:
 
@@ -309,13 +315,17 @@ wails3 generate syso -arch amd64 -icon build/windows/icon.ico -manifest build/wi
 go build -tags production -trimpath -ldflags "-H windowsgui" -o build/bin/Sablewright.exe .
 ```
 
+`build/windows/info.json` holds `0.0.0` where the version goes; CI and the
+build script put the real one into a copy before this step, and a build
+straight from the file reports 0.0.0 in its file properties.
+
 The installer bundles Microsoft's WebView2 bootstrapper, so it also works on a
 PC without the WebView2 runtime; the bare `.exe` needs the runtime already
 there, which Windows 11 always has:
 
 ```
 wails3 generate webview2bootstrapper -dir build/windows/nsis
-makensis -DARG_WAILS_AMD64_BINARY=%CD%\build\bin\Sablewright.exe build\windows\nsis\project.nsi
+makensis -DARG_WAILS_AMD64_BINARY=%CD%\build\bin\Sablewright.exe -DINFO_PRODUCTVERSION=2.0.0 build\windows\nsis\project.nsi
 ```
 
 **macOS** releases are an Apple Silicon `.app` in a disk image. The bundle is
@@ -342,8 +352,9 @@ The `.rpm` requires sonames rather than package names, since the RPM
 distributions disagree on what to call WebKit while providing the same
 soname. Only the `.deb` and `.rpm` carry a glibc floor (2.39, from the Ubuntu
 24.04 build); Arch is rolling, so its glibc is never older than the build's.
-CI installs the `.deb` on Ubuntu 24.04 after building it, so a dependency
-named wrong fails the build rather than someone's install.
+CI installs the `.deb` on Ubuntu 24.04 after building it, which proves the
+Debian and Ubuntu package names; the `.rpm` and Arch names follow those
+distributions' own packaging but aren't installed anywhere by CI.
 
 ### Version numbers
 

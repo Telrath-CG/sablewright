@@ -40,6 +40,46 @@ if not defined GOEXE if exist "%ProgramFiles%\Go\bin\go.exe" call :trygo "%Progr
 if not defined GOEXE if exist "%LOCALAPPDATA%\Programs\Go\bin\go.exe" call :trygo "%LOCALAPPDATA%\Programs\Go\bin\go.exe"
 
 if defined GOEXE goto :gofound
+
+echo         Go isn't installed yet.
+echo.
+where winget >nul 2>&1
+if errorlevel 1 goto :manualgo
+
+echo         Installing it with winget (this may take a few minutes)...
+echo         A Windows permission prompt may appear - please accept it.
+winget install --id GoLang.Go --silent --accept-source-agreements --accept-package-agreements
+echo.
+echo         Re-checking...
+for /f "delims=" %%I in ('where go.exe 2^>nul') do (
+    if not defined GOEXE call :trygo "%%I"
+)
+if not defined GOEXE if exist "%ProgramFiles%\Go\bin\go.exe" call :trygo "%ProgramFiles%\Go\bin\go.exe"
+if defined GOEXE goto :gofound
+
+echo.
+echo   [!] Go was installed but this window can't see it yet, because
+echo       Windows only refreshes PATH for new windows.
+echo.
+echo       Close this window and double-click this script again.
+echo.
+pause
+exit /b 0
+
+:manualgo
+echo   [X] Go is needed to build the app, and winget isn't available
+echo       to install it automatically.
+echo.
+echo       1. Install Go from the page about to open (take the MSI).
+echo       2. Close this window, then run this script again.
+echo.
+echo       That's the only prerequisite - no Visual Studio, no C compiler.
+echo.
+start "" https://go.dev/dl/
+pause
+exit /b 1
+
+:gofound
 for /f "tokens=3" %%V in ('"%GOEXE%" version') do set "GOVER=%%V"
 echo         Found Go %GOVER%
 echo         at %GOEXE%
@@ -133,7 +173,7 @@ rem     a for /f, where cmd would have to parse its quotes and brackets too.
 set "VERSION="
 set "VERFILE=%TEMP%\sablewright-version.txt"
 del /q "%VERFILE%" >nul 2>&1
-powershell -NoProfile -Command "$l = Get-Content 'build\config.yml' | Where-Object { $_ -match '^\s+version:' } | Select-Object -First 1; if ($l) { ($l -split ':',2)[1].Split('#')[0].Trim().Trim([char]34) }" > "%VERFILE%" 2>nul
+powershell -NoProfile -Command "$in = $false; foreach ($l in Get-Content 'build\config.yml') { if ($l -match '^info:') { $in = $true; continue }; if ($l -match '^\S') { $in = $false }; if ($in -and $l -match '^\s+version:') { ($l -split ':',2)[1].Split('#')[0].Trim().Trim([char]34); break } }" > "%VERFILE%" 2>nul
 if exist "%VERFILE%" set /p VERSION=<"%VERFILE%"
 set "COMMIT="
 for /f "delims=" %%C in ('git rev-parse --short HEAD 2^>nul') do set "COMMIT=%%C"
