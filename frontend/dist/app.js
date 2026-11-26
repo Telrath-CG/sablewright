@@ -461,8 +461,31 @@ function syncDetailTimer() {
   renderModelDetail(state.models.selected);
 }
 
+// Go keeps a copy of the timer, so that quitting or closing the window with
+// one going can ask first, and so the macOS menu bar can show it. Every
+// change to the timer comes through drawTimer, so this is sent from there.
+// Numbered, because each report travels on a request of its own and two can
+// overtake each other; Go keeps the newest. The number comes from the clock,
+// in microseconds, so it keeps rising across a reload of the page - a counter
+// would start again at 1 and every report after the reload would be ignored.
+let lastTimerReport = 0;
+function reportTimer() {
+  const s = timerOn()
+    ? { mini: timer.modelName, running: !timerPaused(), elapsedMs: Math.round(timerElapsed()) }
+    : { mini: "", running: false, elapsedMs: 0 };
+  s.seq = lastTimerReport = Math.max(Date.now() * 1000, lastTimerReport + 1);
+  App().TimerChanged(s).catch(() => { /* nothing to show for a missed copy */ });
+}
+// The open dialog's redraw for when the timer changes from outside it - the
+// menu-bar Pause and Resume - so its own timer controls don't go stale.
+let timerListener = null;
+// The open mini dialog's own Stop, when the timer is running for its mini.
+let dialogStop = null;
+
 function drawTimer() {
   const el = $("#timer");
+  reportTimer();
+  if (timerListener) timerListener();
   syncDetailTimer();
   if (!timerOn()) { el.hidden = true; el.innerHTML = ""; return; }
   const paused = timerPaused();
@@ -735,7 +758,8 @@ async function renderModels() {
     const cover = coverPhoto(m);
     return `
     <div class="row${m.id === f.selected ? " sel" : ""}" data-id="${m.id}" id="mini-row-${m.id}"
-      role="option" aria-selected="${m.id === f.selected}">
+      role="option" aria-selected="${m.id === f.selected}"
+      style="--custom-contextmenu: mini; --custom-contextmenu-data: ${m.id}">
       <div class="who">
         ${cover ? `<img class="cover" src="${photoSrc(cover)}" alt="" loading="lazy">`
                 : `<span class="cover blank">▤</span>`}
@@ -867,13 +891,13 @@ async function renderModelDetail(id) {
   const byId = new Map((rack || []).map(p => [p.id, p]));
 
   const photos = (m.photos || []).length ? m.photos.map(p => `
-    <div class="photo">
+    <div class="photo" style="--custom-contextmenu: photo; --custom-contextmenu-data: ${m.id}:${p.id}">
       <img src="${photoSrc(p)}" alt="" data-file="${esc(p.file)}" loading="lazy">
       <div class="cap"><span class="badge" style="background:${
         photoColor(p.kind)};color:${onColor(photoColor(p.kind))};font-size:10px">${esc(p.kind)}</span>${
         p.cover ? `<span class="is-cover" title="Cover shot">★</span>` : ""}</div>
     </div>`).join("")
-    : `<div style="color:var(--muted);font-size:13px">No photos yet — add progress shots when you edit this mini.</div>`;
+    : `<div style="color:var(--muted);font-size:13px">No photos yet — drop pictures here, or add them when you edit this mini.</div>`;
 
   const chips = paintChips(m.paintIds, byId)
     || `<div style="color:var(--muted);font-size:13px">None recorded yet.</div>`;
@@ -936,7 +960,8 @@ async function renderModelDetail(id) {
         <button class="btn ghost small" id="edit">Edit</button>
       </div>
       ${progressBar(m.done, m.count)}
-      <div class="section">PHOTOS</div><div class="photos">${photos}</div>
+      <div class="section">PHOTOS</div>
+      <div class="photos" data-file-drop-target data-mini="${m.id}">${photos}</div>
       <div class="section">PAINTS USED</div>${chips}
       <div class="section">NOTES</div>${noteHtml}
       <div class="section">PAINTING LOG${
@@ -984,9 +1009,11 @@ async function renderPaints() {
     brand: f.brand, range: f.range, stock: f.stock, limit: ROW_LIMIT });
   if (!fresh()) return;
   const shown = page.rows;
+  paintRows = new Map(shown.map(p => [p.id, p]));
 
   const body = page.total ? shown.map(p => `
-    <div class="trow" data-id="${p.id}">
+    <div class="trow" data-id="${p.id}"
+      style="--custom-contextmenu: paint; --custom-contextmenu-data: ${p.id}">
       <span class="swatch" style="background:${esc(p.hex)}"></span>
       <span class="nm">${esc(p.name)}${
         p.code ? ` <span class="code">${esc(p.code)}</span>` : ""}</span>
@@ -1484,6 +1511,129 @@ function paintChips(ids, byId) {
       esc(p.name)}</span>`).join("")}</div>`;
 }
 
+/* ============================================================ MENU ACTIONS */
+// The macOS menu bar, the shortcuts on Windows and Linux, the right-click
+// menus and the menu-bar timer all arrive as named actions from Go, and each
+// runs the same function as the button on screen.
+
+// Deleting a mini, from its dialog or from the list's right-click menu. after
+// runs once the delete has gone through, before the screen is redrawn.
+async function deleteMini(m, after) {
+  const ok = await call(App().Confirm, "Delete mini",
+    `Delete “${m.name}”?\nIt goes to the trash for 30 days, photos and all.`, "Delete");
+  if (!ok) return false;
+  await call(App().DeleteModel, m.id);
+  // Nothing left to log the session against.
+  if (timer.modelId === m.id) clearTimer();
+  if (after) after();
+  if (state.models.selected === m.id) state.models.selected = null;
+  show(state.screen);
+  toast(`Deleted “${m.name}”`, { label: "Undo", run: async () => {
+    await call(App().UndoDeleteModel, m.id);
+    state.models.selected = m.id;
+    show(state.screen);
+    toast("Put back");
+  } });
+  return true;
+}
+
+// Deleting a photo from the detail pane's right-click menu.
+async function deletePhoto(modelId, photoId) {
+  const updated = await call(App().DeletePhoto, modelId, photoId);
+  if (!updated) return;
+  show(state.screen);
+  toast("Photo deleted", { label: "Undo", run: async () => {
+    if (await call(App().UndoDeletePhoto, modelId, photoId)) { show(state.screen); toast("Put back"); }
+  } });
+}
+
+// The open mini dialog's handler for dropped pictures, if it has one. It
+// returns true when it has dealt with them.
+let dropListener = null;
+
+// The paint table's rows as last drawn, with how many minis use each - which
+// the rack from allPaints() doesn't carry, and the delete warning needs.
+let paintRows = new Map();
+
+async function photosAdded(res) {
+  if (res.added) toast(`Added ${plural(res.added, "photo")}` +
+    (res.skipped ? ` — ${res.skipped} skipped` : ""));
+  else if (res.skipped) toast(res.error || "Only pictures can be added: PNG, JPEG, GIF, BMP or WebP");
+  if (!res.added) return;
+  if (dropListener && await dropListener(res)) return;
+  if (state.screen === "models") show("models");
+}
+
+async function menuAction({ action, id }) {
+  // A dialog has the window's attention: the shortcuts that would open or
+  // switch something behind it wait until it's closed.
+  const busy = !$("#modal-backdrop").hidden;
+  if (action.startsWith("screen:")) { if (!busy) show(action.slice(7)); return; }
+  const [a, b] = String(id || "").split(":").map(Number);
+  switch (action) {
+    case "new-mini":
+      if (!busy) modelDialog(null);
+      return;
+    case "export":
+      if (!busy && state.screen === "models" && state.models.selected) {
+        const m = await call(App().GetModel, state.models.selected);
+        if (m) exportDialog(m);
+      }
+      return;
+    case "find": {
+      if (busy) return;
+      const box = content().querySelector(".search input");
+      if (box) { box.focus(); box.select(); }
+      return;
+    }
+    case "backup": if (!busy) $("#btn-backup").click(); return;
+    case "import": if (!busy) $("#btn-restore").click(); return;
+    case "data-folder": call(App().OpenDataFolder); return;
+
+    case "mini-edit": openModel(a); return;
+    case "mini-export": {
+      const m = await call(App().GetModel, a);
+      if (m) exportDialog(m);
+      return;
+    }
+    case "mini-delete": {
+      const m = await call(App().GetModel, a);
+      if (m) deleteMini(m);
+      return;
+    }
+
+    case "photo-open": {
+      const m = await call(App().GetModel, a);
+      const p = m && (m.photos || []).find(x => x.id === b);
+      if (p) call(App().OpenPhoto, p.file);
+      return;
+    }
+    case "photo-cover":
+      if (await call(App().SetCoverPhoto, a, b)) show(state.screen);
+      return;
+    case "photo-delete": deletePhoto(a, b); return;
+
+    case "paint-edit": case "paint-owned": case "paint-want": case "paint-delete": {
+      const p = paintRows.get(a) || (await allPaints()).find(x => x.id === a);
+      if (!p) return;
+      if (action === "paint-edit") { paintDialog(p); return; }
+      if (action === "paint-delete") {
+        const used = p.usedOn || 0;
+        const ok = await call(App().Confirm, "Delete paint", `Delete “${p.name}”?` +
+          (used ? `\nIt's currently linked to ${plural(used, "mini", "minis")}.` : ""), "Delete");
+        if (!ok) return;
+        await call(App().DeletePaint, p.id);
+      } else {
+        await call(App().SetPaintFlags, p.id,
+          action === "paint-owned" ? true : p.owned, action === "paint-want" ? true : p.wishlist);
+      }
+      paintsChanged();
+      show(state.screen);
+      return;
+    }
+  }
+}
+
 /* =================================================================== MODALS */
 // cls narrows the dialog for the ones that ask a single question; the width
 // belongs to the box rather than its contents, so it is set here.
@@ -1530,6 +1680,9 @@ function openModal(html, cls = "", owner = null) {
 }
 function closeModal() {
   const hook = closeHook;
+  dropListener = null;
+  timerListener = null;
+  dialogStop = null;
   closeGuard = null;
   closeHook = null;
   openDialog = null;
@@ -1701,7 +1854,7 @@ async function modelDialog(model, opts = {}) {
       }<div class="photos" style="margin-bottom:16px">${inKind.map(photoTile).join("")}</div>`;
     }).join("");
 
-    const photosTab = `
+    const photosTab = `<div ${m.id ? `data-file-drop-target data-mini="${m.id}"` : ""} class="drop-zone">
       ${isNew && !m.id ? `<div class="note">Photos are saved straight to disk, so this
         mini needs a name and a save first. Add a photo and it'll be saved automatically.</div>` : ""}
       <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
@@ -1711,7 +1864,10 @@ async function modelDialog(model, opts = {}) {
       </div>
       ${photoSections || `<div style="color:var(--muted);font-size:13px">
           No photos yet. Add the maker's product image so this mini is recognisable in
-          the list, or a progress shot to start the record.</div>`}`;
+          the list, or a progress shot to start the record.</div>`}
+      ${m.id ? `<div class="hint" style="margin-top:8px">You can also drop pictures onto this
+          tab to add them as progress photos.</div>` : ""}
+      </div>`;
 
     const sess = m.sessions || [];
     // The modal backdrop covers the sidebar, so while this dialog is open the
@@ -1789,24 +1945,7 @@ async function modelDialog(model, opts = {}) {
     $("#cancel").onclick = requestClose;
     $("#save").onclick = guard(save, busy);
     const del = $("#del");
-    if (del) del.onclick = guard(async () => {
-      const ok = await call(App().Confirm, "Delete mini",
-        `Delete “${m.name}”?\nIt goes to the trash for 30 days, photos and all.`,
-        "Delete");
-      if (!ok) return;
-      const gone = m.id, name = m.name;
-      await call(App().DeleteModel, gone);
-      // Nothing left to log the session against.
-      if (timer.modelId === gone) clearTimer();
-      dirty = false;
-      closeModal(); state.models.selected = null; show(state.screen);
-      toast(`Deleted “${name}”`, { label: "Undo", run: async () => {
-        await call(App().UndoDeleteModel, gone);
-        state.models.selected = gone;
-        show(state.screen);
-        toast("Put back");
-      } });
-    }, busy);
+    if (del) del.onclick = guard(() => deleteMini(m, () => { dirty = false; closeModal(); }), busy);
 
     // A tab switch leaves focus on the tab button, so drop the caret somewhere
     // useful. A re-render mid-typing has already put it back, and that wins.
@@ -1835,8 +1974,11 @@ async function modelDialog(model, opts = {}) {
       const sp = $("#s-stop");
       if (sp) sp.onclick = () => {
         collect();
-        editSession = { ...editSession, minutes: timerMinutes() };
+        const mins = timerMinutes();
+        // Clearing the timer redraws this dialog, re-reading the form, so the
+        // minutes go in after it.
         clearTimer();
+        editSession = { ...editSession, minutes: mins };
         render();
         const n = $("#s-notes");
         if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
@@ -1995,6 +2137,32 @@ async function modelDialog(model, opts = {}) {
   // entry dated before it pulls it back - not the saved value it replaced.
   const earlier = (a, b) => !a ? b : !b ? a : (a < b ? a : b);
   const oldestEntry = sessions => (sessions || []).map(x => x.date).filter(Boolean).sort()[0] || "";
+
+  timerListener = () => { if (isOpen() && tab === "log") { collect(); render(); } };
+  // The menu bar's Stop, when this dialog is open for the timer's mini: it
+  // stops here, in the log tab, the way the tab's own Stop does - keeping
+  // everything else in the dialog as it is.
+  dialogStop = () => {
+    if (!isOpen() || timer.modelId !== m.id) return false;
+    collect();
+    const mins = timerMinutes();
+    tab = "log";
+    clearTimer();
+    editSession = { ...editSession, minutes: mins };
+    render();
+    const n = $("#s-notes");
+    if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+    return true;
+  };
+
+  // Pictures dropped onto the photos tab arrive through Go; when they are
+  // for this mini, the tab is redrawn with them.
+  dropListener = async res => {
+    if (!isOpen() || res.id !== m.id) return false;
+    const fresh = await call(App().GetModel, m.id);
+    if (fresh && isOpen()) { collect(); dirty = true; m.photos = fresh.photos || []; render(); }
+    return true;
+  };
 
   // An Undo arrives after its toast, by which time this dialog may be closed;
   // it then refreshes the screen behind instead of reopening it.
@@ -2296,6 +2464,26 @@ window.addEventListener("DOMContentLoaded", async () => {
   await ready();
   initNav();
   initKeys();
+  window.wails.Events.On("menu", ev => menuAction(ev.data || {}));
+  window.wails.Events.On("photos-added", ev => photosAdded(ev.data || {}));
+  // The menu-bar timer's Pause, Resume and Stop.
+  window.wails.Events.On("timer", async ev => {
+    if (!timerOn()) return;
+    if (ev.data === "toggle") { timerPaused() ? resumeTimer() : pauseTimer(); return; }
+    if (ev.data !== "stop") return;
+    // Stopping opens the log in a dialog of its own, and a dialog already
+    // open is never closed from under its unsaved work: if it is this
+    // timer's mini, it stops there, in its own log tab; any other dialog is
+    // left as it is, and the timer keeps running until it's closed.
+    if (!$("#modal-backdrop").hidden) {
+      if (!(dialogStop && dialogStop())) toast("Close the open dialog first, then stop the timer");
+      return;
+    }
+    stopTimer();
+  });
+  // Go's copy of the timer starts out matching the page's: after a reload
+  // the page's timer is gone, and so should the menu-bar clock be.
+  reportTimer();
   // The build names itself rather than carrying a string the source has to
   // remember to update - the linker stamps it in, so it can't go stale.
   App().Version().then(v => { $("#version").textContent = v; });
