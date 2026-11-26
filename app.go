@@ -1,13 +1,9 @@
 package main
 
 import (
-	"archive/zip"
 	"context"
 	"fmt"
-	"io"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -387,6 +383,16 @@ func (a *App) DeletePhoto(modelID, photoID int) (*Model, error) {
 	return &m, nil
 }
 
+// UndoDeletePhoto puts a deleted photo back. The screen offers it as an Undo
+// on the toast, as it does for a deleted mini.
+func (a *App) UndoDeletePhoto(modelID, photoID int) (*Model, error) {
+	m, err := a.store.UndoDeletePhoto(modelID, photoID)
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 // SetCoverPhoto picks which shot represents this mini in the list.
 func (a *App) SetCoverPhoto(modelID, photoID int) (*Model, error) {
 	m, err := a.store.SetCoverPhoto(modelID, photoID)
@@ -431,44 +437,10 @@ func (a *App) Backup() (string, error) {
 	if err != nil || dst == "" {
 		return "", err
 	}
-	f, err := os.Create(dst)
-	if err != nil {
-		return "", fmt.Errorf("could not write the backup: %w", err)
-	}
-	defer f.Close()
-	z := zip.NewWriter(f)
-	if err := addFileToZip(z, a.store.path, "collection.json"); err != nil {
-		z.Close()
+	if err := a.store.WriteBackup(dst); err != nil {
 		return "", err
 	}
-	entries, _ := os.ReadDir(a.store.PhotoDir())
-	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if err := addFileToZip(z, filepath.Join(a.store.PhotoDir(), e.Name()), "photos/"+e.Name()); err != nil {
-			z.Close()
-			return "", err
-		}
-	}
-	if err := z.Close(); err != nil {
-		return "", fmt.Errorf("could not finish the backup: %w", err)
-	}
 	return dst, nil
-}
-
-func addFileToZip(z *zip.Writer, src, name string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return fmt.Errorf("could not read %s: %w", filepath.Base(src), err)
-	}
-	defer in.Close()
-	w, err := z.Create(name)
-	if err != nil {
-		return err
-	}
-	_, err = io.Copy(w, in)
-	return err
 }
 
 // Restore replaces the current collection with the contents of a backup zip.

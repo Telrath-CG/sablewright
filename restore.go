@@ -87,10 +87,18 @@ func sanitizePhotos(d *Data) {
 	for i := range d.Trash {
 		d.Trash[i].Model.Photos = clean(d.Trash[i].Model.Photos)
 	}
+	trashed := d.PhotoTrash[:0]
+	for _, t := range d.PhotoTrash {
+		if kept := clean([]Photo{t.Photo}); len(kept) == 1 {
+			t.Photo = kept[0]
+			trashed = append(trashed, t)
+		}
+	}
+	d.PhotoTrash = trashed
 }
 
 // photoFiles lists every file a collection's photos use, thumbnails included,
-// trashed minis included.
+// trashed minis and trashed photos included.
 func photoFiles(d *Data) map[string]bool {
 	files := map[string]bool{}
 	add := func(photos []Photo) {
@@ -106,6 +114,9 @@ func photoFiles(d *Data) map[string]bool {
 	}
 	for _, t := range d.Trash {
 		add(t.Model.Photos)
+	}
+	for _, t := range d.PhotoTrash {
+		add([]Photo{t.Photo})
 	}
 	return files
 }
