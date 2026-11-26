@@ -264,29 +264,69 @@ func TestCoverPhotoPicksTheShotWorthShowing(t *testing.T) {
 	}
 }
 
-// Deleting a photo has to take its thumbnail with it. A generated file with
-// nothing left pointing at it is invisible, so it would accumulate in the
-// data folder forever.
-func TestDeletePhotoRemovesTheThumbnailToo(t *testing.T) {
+// A deleted photo goes to the trash with its thumbnail, can be put back, and
+// once purged takes the thumbnail with it: a generated file with nothing left
+// pointing at it is just clutter in the data folder.
+func TestDeletePhotoIsUndoableAndPurgeTakesTheThumbnail(t *testing.T) {
 	s := newTempStore(t)
 	if err := os.MkdirAll(s.PhotoDir(), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, n := range []string{"m1_1.jpg", "t_m1_1.jpg"} {
+	for _, n := range []string{"m1_1.jpg", "t_m1_1.jpg", "m1_2.jpg"} {
 		if err := os.WriteFile(filepath.Join(s.PhotoDir(), n), []byte("x"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	s.data = Data{NextID: 100, Models: []Model{{ID: 1, Name: "Marine", Photos: []Photo{
-		{ID: 5, File: "m1_1.jpg", Thumb: "t_m1_1.jpg", Kind: "Progress"},
+		{ID: 5, File: "m1_1.jpg", Thumb: "t_m1_1.jpg", Kind: "Progress", Cover: true},
+		{ID: 6, File: "m1_2.jpg", Kind: "Progress"},
 	}}}}
 
-	if _, err := s.DeletePhoto(1, 5); err != nil {
+	m, err := s.DeletePhoto(1, 5)
+	if err != nil {
 		t.Fatalf("DeletePhoto(): %v", err)
 	}
+	if len(m.Photos) != 1 || m.Photos[0].ID != 6 {
+		t.Fatalf("after the delete the mini has %+v, want only photo 6", m.Photos)
+	}
+	if _, err := os.Stat(filepath.Join(s.PhotoDir(), "m1_1.jpg")); err != nil {
+		t.Errorf("the photo's file went at once, so the delete can't be undone: %v", err)
+	}
 
-	if _, err := os.Stat(filepath.Join(s.PhotoDir(), "t_m1_1.jpg")); !os.IsNotExist(err) {
-		t.Error("the thumbnail outlived the photo it was made from")
+	// A cover picked in the meantime stays the cover.
+	if _, err := s.SetCoverPhoto(1, 6); err != nil {
+		t.Fatal(err)
+	}
+	m, err = s.UndoDeletePhoto(1, 5)
+	if err != nil {
+		t.Fatalf("UndoDeletePhoto(): %v", err)
+	}
+	if len(m.Photos) != 2 || m.Photos[0].ID != 5 || m.Photos[1].ID != 6 {
+		t.Errorf("after undo the photos are %+v, want 5 back in its place before 6", m.Photos)
+	}
+	if m.Photos[0].Cover || !m.Photos[1].Cover {
+		t.Errorf("covers = %v/%v, want the cover chosen since the delete kept", m.Photos[0].Cover, m.Photos[1].Cover)
+	}
+	if len(s.data.PhotoTrash) != 0 {
+		t.Errorf("photo trash still holds %+v", s.data.PhotoTrash)
+	}
+
+	// Deleted again and left past its month, it goes for good.
+	if _, err := s.DeletePhoto(1, 5); err != nil {
+		t.Fatal(err)
+	}
+	s.data.PhotoTrash[0].Deleted = "2000-01-01"
+	s.PurgeTrash(day("2026-08-08"))
+	for _, n := range []string{"m1_1.jpg", "t_m1_1.jpg"} {
+		if _, err := os.Stat(filepath.Join(s.PhotoDir(), n)); !os.IsNotExist(err) {
+			t.Errorf("%s outlived the purge", n)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(s.PhotoDir(), "m1_2.jpg")); err != nil {
+		t.Errorf("the photo that was never deleted went too: %v", err)
+	}
+	if _, err := s.UndoDeletePhoto(1, 5); err == nil {
+		t.Error("a purged photo came back")
 	}
 }
 
