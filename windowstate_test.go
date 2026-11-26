@@ -48,3 +48,19 @@ func TestGrabbableNeedsTheTopEdgeOnAScreen(t *testing.T) {
 		t.Error("a window hanging off the left with 200px showing was called unreachable")
 	}
 }
+
+// A window last sized on a bigger monitor than any still connected shrinks to
+// fit, never below the minimum.
+func TestFitSizeShrinksToTheLargestScreen(t *testing.T) {
+	laptop := []application.Rect{{X: 0, Y: 25, Width: 1512, Height: 920}}
+	if w, h := fitSize(windowState{Width: 3000, Height: 1800}, laptop); w != 1512 || h != 920 {
+		t.Errorf("fitSize = %dx%d, want 1512x920", w, h)
+	}
+	if w, h := fitSize(windowState{Width: 1200, Height: 800}, laptop); w != 1200 || h != 800 {
+		t.Errorf("fitSize = %dx%d, want the saved 1200x800 unchanged", w, h)
+	}
+	tiny := []application.Rect{{Width: 800, Height: 500}}
+	if w, h := fitSize(windowState{Width: 1200, Height: 800}, tiny); w != minWidth || h != minHeight {
+		t.Errorf("fitSize = %dx%d, want the minimum %dx%d", w, h, minWidth, minHeight)
+	}
+}

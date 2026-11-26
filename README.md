@@ -227,7 +227,9 @@ still the one that carries everything.
 Only one copy of Sablewright runs at a time. Launching it again brings the open
 window forward, since two copies would each save over the other's changes. The
 window opens where you last left it, at the same size; if that was on a screen
-that's no longer connected, it opens centred instead.
+that's no longer connected, or is now too big for the screens there are, it
+opens centred instead. (On Wayland the desktop chooses where windows go, so
+only the size comes back.)
 
 **Deleting a mini** puts it in the trash for 30 days rather than destroying
 it, and the toast offers *Undo* on the spot. Notes and a status can be typed
@@ -244,8 +246,8 @@ for editing. Shortcuts use ⌘ on macOS and Ctrl elsewhere:
 | Shortcut | Does |
 | --- | --- |
 | ⌘N / Ctrl+N | Add a mini |
-| ⌘E / Ctrl+E | Export the selected mini |
-| ⌘F / Ctrl+F | Search the current screen |
+| ⌘E / Ctrl+E | Export the mini selected on the Models screen |
+| ⌘F / Ctrl+F | Jump to the search box, on the screens that have one |
 | ⌘1 – ⌘7 / Ctrl+1 – Ctrl+7 | Dashboard, Models, Projects, Paint Inventory, Wishlist, Technique Notes, Time at the Desk |
 
 On macOS the same commands are in the File and View menus, with Back Up,

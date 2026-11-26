@@ -2,6 +2,9 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -125,10 +128,38 @@ type photosAdded struct {
 	Error   string `json:"error,omitempty"`
 }
 
+// maxDroppedPicture is the largest file a drop will add: well beyond any
+// photo, and short of anything that would fill the disk unnoticed.
+const maxDroppedPicture = 200 << 20
+
+// droppablePicture reports whether a dropped path is a picture to add.
+//
+// Wails hands the dropped paths to the page and takes them back from it, so
+// they are only as trustworthy as the page - which is why the file picker's
+// rule is applied again here rather than taken on trust: a regular file (not
+// a pipe that would hang the copy, nor a link), of a sensible size, in one of
+// the picker's formats, whose first bytes are actually a picture.
+func droppablePicture(path string) bool {
+	if !photoExts[strings.ToLower(filepath.Ext(path))] {
+		return false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > maxDroppedPicture {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(f, head)
+	return strings.HasPrefix(http.DetectContentType(head[:n]), "image/")
+}
+
 // onFilesDropped adds pictures dropped onto a mini's photos. The page marks
 // the drop zone with the mini's id in data-mini (and optionally the kind of
-// photo in data-kind); the paths never pass through the page, which keeps the
-// same rule as the file picker: only the app decides what it opens.
+// photo in data-kind).
 func (a *App) onFilesDropped(e *application.WindowEvent) {
 	ctx := e.Context()
 	files := ctx.DroppedFiles()
@@ -149,13 +180,16 @@ func (a *App) onFilesDropped(e *application.WindowEvent) {
 	go func() {
 		res := photosAdded{ID: id}
 		for _, f := range files {
-			if !photoExts[strings.ToLower(filepath.Ext(f))] {
+			if !droppablePicture(f) {
 				res.Skipped++
 				continue
 			}
 			if _, err := a.store.AddPhoto(id, f, kind); err != nil {
+				// The page is told only that something failed; the detail,
+				// which names the file, goes to the log.
+				logError("adding a dropped photo: " + err.Error())
 				res.Skipped++
-				res.Error = err.Error()
+				res.Error = "Some of those pictures couldn't be added"
 				continue
 			}
 			res.Added++
