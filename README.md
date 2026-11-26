@@ -148,7 +148,8 @@ recipes use it.
 
 **Photos** — added through a native file picker and *copied* into the app's own
 folder, so moving or deleting the originals later doesn't break anything.
-Click a photo to open it full size.
+Click a photo to open it full size. PNG, JPEG, GIF, BMP and WebP are accepted —
+the formats every platform can draw.
 
 A thumbnail is generated on import and is what the app actually draws, so a
 mini with a dozen progress shots costs a fraction of the memory it used to;
@@ -188,13 +189,22 @@ opens it. Nothing is uploaded anywhere; the app makes no network connections.
 
 **Back it up** with *Backup data* in the sidebar — one zip containing the
 database and every photo. *Import backup* restores one, which is also how you
-move to a new computer.
+move to a new computer. Importing moves your current collection and photos
+into `backups/before-restore-<date>` first, so importing the wrong file can be
+undone by hand. Only the database and the picture files it names as photos
+are read from a backup; anything else in the zip is ignored.
 
 On top of that the app copies `collection.json` into a `backups` folder every
-time it starts, keeping the last three. That's for the failure you only notice
-afterwards — a bad import, a mass edit, a file that stopped being readable.
-Only the database is copied, since the photos are large and don't change;
-a manual backup is still the one that carries everything.
+time it starts, keeping the last three distinct copies — a launch that changed
+nothing makes no new one. If the collection is ever found unreadable and set
+aside, the copies from before that are kept too, for as long as the set-aside
+file is in the folder. That's for the failure you only notice afterwards — a
+bad import, a mass edit, a file that stopped being readable. Only the database
+is copied, since the photos are large and don't change; a manual backup is
+still the one that carries everything.
+
+Only one copy of Sablewright runs at a time. Launching it again brings the open
+window forward, since two copies would each save over the other's changes.
 
 **Deleting a mini** puts it in the trash for 30 days rather than destroying
 it, and the toast offers *Undo* on the spot. Notes and a status can be typed
@@ -212,7 +222,9 @@ comfortably fast and brings a real benefit: no cgo, no C compiler, and no native
 database library to build per platform. That's a large part of why the Windows
 build needs nothing but Go. Every save is atomic — written to a temp file and
 renamed — so an interrupted write can't corrupt your collection, and if the file
-is ever unreadable it's moved aside rather than deleted.
+is ever unreadable it's moved aside rather than deleted, and the app says so
+when it opens. If it can't be moved aside, the app stops rather than write over
+it.
 
 ---
 
@@ -220,10 +232,10 @@ is ever unreadable it's moved aside rather than deleted.
 
 ### Prerequisites
 
-Every platform needs [Go 1.25 or newer](https://go.dev/dl/) and the Wails CLI:
+Every platform needs [Go 1.26 or newer](https://go.dev/dl/) and the Wails CLI:
 
 ```
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
 ```
 
 **There is no Node toolchain to install.** Wails projects normally want npm,

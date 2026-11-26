@@ -295,3 +295,24 @@ func TestSafeFilenameKeepsANameUsableOnEveryPlatform(t *testing.T) {
 		}
 	}
 }
+
+// Stepping back months from the 31st used to overflow into the next month, so
+// a report run on New Year's Eve showed Mar, May and Jul twice and no Feb,
+// Apr or Jun at all. The buckets have to be twelve consecutive months ending
+// on the current one, whatever day of the month it is.
+func TestTimeReportMonthsAreConsecutiveOnAnyDay(t *testing.T) {
+	s := &Store{}
+	for _, today := range []string{"2026-12-31", "2026-03-31", "2026-05-31", "2026-03-29", "2026-01-01"} {
+		now := day(today)
+		r := s.TimeReport(now)
+		if len(r.Months) != 12 {
+			t.Fatalf("%s: %d months, want 12", today, len(r.Months))
+		}
+		for i, m := range r.Months {
+			want := time.Date(now.Year(), now.Month()-11+time.Month(i), 1, 0, 0, 0, 0, time.UTC)
+			if m.Key != want.Format("2006-01") || m.Label != want.Format("Jan") {
+				t.Errorf("%s: bucket %d is %s (%s), want %s", today, i, m.Key, m.Label, want.Format("2006-01"))
+			}
+		}
+	}
+}

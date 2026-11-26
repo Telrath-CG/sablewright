@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wailsapp/wails/v2/pkg/options"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -30,20 +31,30 @@ func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// Both of these are housekeeping the user never asked for, so neither is
+	// All of this is housekeeping the user never asked for, so none of it is
 	// allowed to hold the window shut. A collection with hundreds of photos
 	// would take a noticeable while to catch its thumbnails up, and until
 	// each one lands the UI simply draws the original.
 	go func() {
 		now := time.Now()
-		if err := a.store.SnapshotOnStartup(now.Format("20060102-150405")); err != nil {
-			// A missing or unreadable file is what the snapshot is for, not
-			// something to interrupt the user over on the way in.
-			_ = err
-		}
+		// A missing or unreadable file is what the snapshot is for, not
+		// something to interrupt the user over on the way in.
+		_ = a.store.SnapshotOnStartup(now.Format("20060102-150405"))
 		a.store.PurgeTrash(now)
 		a.store.BackfillThumbs()
 	}()
+}
+
+// onSecondInstance brings the open window forward when Sablewright is
+// launched again. Only one copy may run: each holds the whole collection in
+// memory and saves all of it, so a second copy would silently undo the
+// first one's changes the next time it saved.
+func (a *App) onSecondInstance(options.SecondInstanceData) {
+	if a.ctx == nil {
+		return
+	}
+	wruntime.WindowUnminimise(a.ctx)
+	wruntime.WindowShow(a.ctx)
 }
 
 // ---------------------------------------------------------------------------
@@ -107,8 +118,9 @@ func (a *App) ListPaints(f PaintFilter) PaintPage {
 	if f.Limit > 0 && len(ps) > f.Limit {
 		ps = ps[:f.Limit]
 	}
+	used := a.store.PaintUsageCounts()
 	for _, p := range ps {
-		page.Rows = append(page.Rows, PaintRow{Paint: p, UsedOn: a.store.PaintUsage(p.ID)})
+		page.Rows = append(page.Rows, PaintRow{Paint: p, UsedOn: used[p.ID]})
 	}
 	return page
 }
@@ -167,11 +179,12 @@ type WishlistPage struct {
 func (a *App) Wishlist() WishlistPage {
 	listed, missing := a.store.WishlistPaints()
 	page := WishlistPage{Rows: []PaintRow{}, Missing: []PaintRow{}}
+	used := a.store.PaintUsageCounts()
 	for _, p := range listed {
-		page.Rows = append(page.Rows, PaintRow{Paint: p, UsedOn: a.store.PaintUsage(p.ID)})
+		page.Rows = append(page.Rows, PaintRow{Paint: p, UsedOn: used[p.ID]})
 	}
 	for _, p := range missing {
-		page.Missing = append(page.Missing, PaintRow{Paint: p, UsedOn: a.store.PaintUsage(p.ID)})
+		page.Missing = append(page.Missing, PaintRow{Paint: p, UsedOn: used[p.ID]})
 	}
 	return page
 }
@@ -345,9 +358,7 @@ func (a *App) AddPhotos(modelID int, kind string) (*Model, error) {
 			"Product": " (product image)",
 		}[kind],
 		Filters: []wruntime.FileFilter{
-			{DisplayName: "Images (*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp)",
-				Pattern: "*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp"},
-			{DisplayName: "All files (*.*)", Pattern: "*.*"},
+			{DisplayName: "Images", Pattern: photoPattern},
 		},
 	})
 	if err != nil {
@@ -385,8 +396,14 @@ func (a *App) SetCoverPhoto(modelID, photoID int) (*Model, error) {
 }
 
 // OpenPhoto shows a photo full size in the system's default image viewer.
+// Only image files are handed to the system: the name comes from the page,
+// and the system opener would just as happily run a script.
 func (a *App) OpenPhoto(file string) error {
-	return openPath(filepath.Join(a.store.PhotoDir(), filepath.Base(file)))
+	path, ok := a.store.photoPath(file)
+	if !ok || !isViewableImage(file) {
+		return fmt.Errorf("that isn't a photo")
+	}
+	return openPath(path)
 }
 
 func (a *App) OpenDataFolder() error { return openPath(a.store.Dir()) }
@@ -465,7 +482,8 @@ func (a *App) Restore() (bool, error) {
 		return false, err
 	}
 	ok, err := a.Confirm("Import backup",
-		"This replaces everything currently in the app with the contents of that backup.\n\nContinue?",
+		"This replaces everything currently in the app with the contents of that backup.\n\n"+
+			"Your current collection and photos are moved to the backups folder first.\n\nContinue?",
 		"Import")
 	if err != nil {
 		return false, err
@@ -473,57 +491,7 @@ func (a *App) Restore() (bool, error) {
 	if !ok {
 		return false, nil
 	}
-
-	zr, err := zip.OpenReader(src)
-	if err != nil {
-		return false, fmt.Errorf("could not open that zip: %w", err)
-	}
-	defer zr.Close()
-	hasData := false
-	for _, f := range zr.File {
-		if f.Name == "collection.json" {
-			hasData = true
-		}
-	}
-	if !hasData {
-		return false, fmt.Errorf("that zip doesn't look like a Sablewright backup")
-	}
-
-	a.store.mu.Lock()
-	defer a.store.mu.Unlock()
-	for _, f := range zr.File {
-		if f.FileInfo().IsDir() {
-			continue
-		}
-		// guard against zip-slip: never write outside the data folder
-		name := filepath.Clean(filepath.FromSlash(f.Name))
-		if strings.HasPrefix(name, "..") || filepath.IsAbs(name) {
-			continue
-		}
-		dst := filepath.Join(a.store.dir, name)
-		if !strings.HasPrefix(dst, filepath.Clean(a.store.dir)+string(os.PathSeparator)) {
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			return false, err
-		}
-		rc, err := f.Open()
-		if err != nil {
-			return false, err
-		}
-		out, err := os.Create(dst)
-		if err != nil {
-			rc.Close()
-			return false, err
-		}
-		_, cErr := io.Copy(out, rc)
-		rc.Close()
-		out.Close()
-		if cErr != nil {
-			return false, cErr
-		}
-	}
-	if err := a.store.load(); err != nil {
+	if err := a.store.RestoreFrom(src, time.Now().Format("20060102-150405")); err != nil {
 		return false, err
 	}
 	return true, nil

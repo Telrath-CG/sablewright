@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -252,7 +254,9 @@ var Statuses = []string{"Backlog", "Assembled", "Primed", "In Progress", "Comple
 //	3  the library gained the Citadel Air range
 //	4  the library gained Kimera Kolors, Pure and Signature Blends alike
 //	5  a model entry carries how many minis it is, and how many are finished
-const dataVersion = 5
+//	6  one record of details per project name: renaming a project onto an
+//	   existing one used to leave two, and only one was ever read
+const dataVersion = 6
 
 func today() string { return time.Now().Format("2006-01-02") }
 
@@ -281,20 +285,43 @@ func appDir(name, unixName string) string {
 	}
 }
 
-func NewStore() (*Store, error) {
-	dir := DataDir()
+// NewStore opens the collection in the data folder. The warning is a problem
+// the app survived - a collection file that could not be read and was moved
+// aside - which the UI shows once it is up. The error is one it can't start
+// past.
+func NewStore() (s *Store, warning string, err error) { return openStore(DataDir()) }
+
+// openStore is NewStore for a given folder.
+func openStore(dir string) (s *Store, warning string, err error) {
 	if err := os.MkdirAll(filepath.Join(dir, "photos"), 0o755); err != nil {
-		return nil, fmt.Errorf("could not create the data folder: %w", err)
+		return nil, "", fmt.Errorf("could not create the data folder: %w", err)
 	}
-	s := &Store{dir: dir, path: filepath.Join(dir, "collection.json")}
-	if err := s.load(); err != nil {
-		return nil, err
+	s = &Store{dir: dir, path: filepath.Join(dir, "collection.json")}
+	s.RemoveStaleStaging()
+	err = s.load()
+	var aside *setAsideError
+	if errors.As(err, &aside) {
+		return s, aside.Error(), nil
 	}
-	return s, nil
+	if err != nil {
+		return nil, "", err
+	}
+	return s, "", nil
 }
 
 func (s *Store) PhotoDir() string { return filepath.Join(s.dir, "photos") }
 func (s *Store) Dir() string      { return s.dir }
+
+// setAsideError is load's report of a collection file it could not parse and
+// moved out of the way. The store is usable afterwards, holding a fresh
+// collection, so this is a warning to pass on rather than a reason to stop.
+type setAsideError struct{ name string }
+
+func (e *setAsideError) Error() string {
+	return fmt.Sprintf("Your collection file could not be read, so it was set aside as %s "+
+		"in the data folder and a fresh collection was started. "+
+		"Your automatic backups are in the backups folder beside it.", e.name)
+}
 
 func (s *Store) load() error {
 	b, err := os.ReadFile(s.path)
@@ -306,25 +333,45 @@ func (s *Store) load() error {
 	if err != nil {
 		return fmt.Errorf("could not read your collection: %w", err)
 	}
-	if err := json.Unmarshal(b, &s.data); err != nil {
-		// Don't destroy the file we failed to parse - move it aside so the
-		// user still has it, and carry on with an empty collection.
+	d, err := decodeData(b)
+	if err != nil {
+		// Never write over a file that failed to parse: it is the user's whole
+		// collection, and a fix may well be possible by hand. Move it aside and
+		// start fresh - and if it can't be moved, stop rather than replace it.
 		bad := s.path + ".corrupt-" + time.Now().Format("20060102-150405")
-		_ = os.Rename(s.path, bad)
+		if rerr := os.Rename(s.path, bad); rerr != nil {
+			return fmt.Errorf("your collection file could not be read (%v), and could not be "+
+				"moved aside to keep it safe: %w", err, rerr)
+		}
 		s.data = Data{Version: dataVersion, NextID: 1}
 		s.addLibraryPaints()
-		_ = s.persist()
-		return fmt.Errorf("your collection file could not be read and was set aside as %s; starting fresh", filepath.Base(bad))
+		if perr := s.persist(); perr != nil {
+			return perr
+		}
+		return &setAsideError{name: filepath.Base(bad)}
 	}
-	if s.data.NextID < 1 {
-		s.data.NextID = 1
-	}
+	s.data = d
 	if s.data.Version < dataVersion {
 		s.migrate()
 		s.data.Version = dataVersion
 		return s.persist()
 	}
 	return nil
+}
+
+// decodeData parses a collection file into a fresh Data. Fresh matters: an
+// older file lacks keys a newer one has, and decoding into a value that
+// already held a collection would leave those keys at their old contents.
+func decodeData(b []byte) (Data, error) {
+	var d Data
+	if err := json.Unmarshal(b, &d); err != nil {
+		return Data{}, err
+	}
+	if d.NextID < 1 {
+		d.NextID = 1
+	}
+	sanitizePhotos(&d)
+	return d, nil
 }
 
 // rollingBackups is how many automatic copies of the collection are kept.
@@ -353,14 +400,71 @@ func (s *Store) SnapshotOnStartup(stamp string) error {
 	if err := os.MkdirAll(s.BackupDir(), 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(
-		filepath.Join(s.BackupDir(), "collection-"+stamp+".json"), raw, 0o644); err != nil {
-		return err
-	}
-
-	entries, err := os.ReadDir(s.BackupDir())
+	made, err := s.rollingSnapshots()
 	if err != nil {
 		return err
+	}
+	// A launch that changed nothing since the last one makes no new copy.
+	// Without this, opening and closing the app a few times rotates every
+	// distinct copy out - which is exactly what happens after a collection
+	// is lost and the app keeps starting on the empty one that replaced it.
+	if n := len(made); n > 0 {
+		if last, err := os.ReadFile(filepath.Join(s.BackupDir(), made[n-1])); err == nil &&
+			bytes.Equal(last, raw) {
+			return nil
+		}
+	}
+	name := "collection-" + stamp + ".json"
+	if err := os.WriteFile(filepath.Join(s.BackupDir(), name), raw, 0o644); err != nil {
+		return err
+	}
+	made = append(made, name)
+	sort.Strings(made)
+	// Copies taken before the collection was last found unreadable are the
+	// good ones, and launches on the fresh collection that replaced it would
+	// otherwise rotate them out one by one. They are left out of the count
+	// for as long as the set-aside file is there to say a loss happened.
+	lost := s.lastSetAside()
+	var rotating []string
+	for _, n := range made {
+		if snapshotStamp(n) >= lost {
+			rotating = append(rotating, n)
+		}
+	}
+	for i := 0; i < len(rotating)-rollingBackups; i++ {
+		_ = os.Remove(filepath.Join(s.BackupDir(), rotating[i]))
+	}
+	return nil
+}
+
+// snapshotStamp is the time a rolling copy was taken, as written in its name.
+func snapshotStamp(name string) string {
+	return strings.TrimSuffix(strings.TrimPrefix(name, "collection-"), ".json")
+}
+
+// lastSetAside is the time of the most recent collection file set aside as
+// unreadable, in the same form as a snapshot's stamp, or "" if there is none.
+func (s *Store) lastSetAside() string {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return ""
+	}
+	prefix := filepath.Base(s.path) + ".corrupt-"
+	last := ""
+	for _, e := range entries {
+		if stamp, ok := strings.CutPrefix(e.Name(), prefix); ok && stamp > last {
+			last = stamp
+		}
+	}
+	return last
+}
+
+// rollingSnapshots lists the automatic copies, oldest first. The names carry
+// a sortable timestamp, so sorting them by name sorts them by age.
+func (s *Store) rollingSnapshots() ([]string, error) {
+	entries, err := os.ReadDir(s.BackupDir())
+	if err != nil {
+		return nil, err
 	}
 	var made []string
 	for _, e := range entries {
@@ -369,12 +473,8 @@ func (s *Store) SnapshotOnStartup(stamp string) error {
 			made = append(made, e.Name())
 		}
 	}
-	// The names carry a sortable timestamp, so the oldest sort first.
 	sort.Strings(made)
-	for i := 0; i < len(made)-rollingBackups; i++ {
-		_ = os.Remove(filepath.Join(s.BackupDir(), made[i]))
-	}
-	return nil
+	return made, nil
 }
 
 // migrate brings a collection saved by an older build up to dataVersion. It
@@ -397,7 +497,25 @@ func (s *Store) migrate() {
 			s.data.Models[i].Count = 1
 		}
 	}
+	s.data.Projects = mergeDuplicateProjects(s.data.Projects)
 	s.addLibraryPaints()
+}
+
+// mergeDuplicateProjects folds records that share a name into one. The last
+// of them wins where they disagree, because it is the one the Projects screen
+// was showing; notes from the others are kept beneath its own.
+func mergeDuplicateProjects(in []ProjectMeta) []ProjectMeta {
+	out := make([]ProjectMeta, 0, len(in))
+	at := map[string]int{}
+	for _, p := range in {
+		if i, ok := at[p.Name]; ok {
+			out[i] = mergeProjectMeta(p, out[i])
+			continue
+		}
+		at[p.Name] = len(out)
+		out = append(out, p)
+	}
+	return out
 }
 
 // addLibraryPaints stocks the rack from the built-in library, skipping any
@@ -650,6 +768,9 @@ func (s *Store) SaveModel(m Model) (Model, error) {
 	if m.ID == 0 {
 		m.ID = s.nextID()
 		m.Created = today()
+		// Photos only arrive through AddPhoto, which needs a saved mini, so
+		// a new one has none - whatever the page sent.
+		m.Photos = []Photo{}
 		s.data.Models = append(s.data.Models, m)
 	} else {
 		found := false
@@ -751,9 +872,11 @@ func (s *Store) AddPhoto(modelID int, srcPath, kind string) (Model, error) {
 	if idx < 0 {
 		return Model{}, fmt.Errorf("that mini no longer exists")
 	}
+	// Only picture formats are kept: OpenPhoto hands these files to the
+	// system opener, which would run anything else as readily as show it.
 	ext := strings.ToLower(filepath.Ext(srcPath))
-	if ext == "" {
-		ext = ".jpg"
+	if !photoExts[ext] {
+		return Model{}, fmt.Errorf("%s isn't a picture format Sablewright keeps", filepath.Base(srcPath))
 	}
 	name := fmt.Sprintf("m%d_%d%s", modelID, time.Now().UnixNano(), ext)
 	dst := filepath.Join(s.PhotoDir(), name)
@@ -795,9 +918,11 @@ func (s *Store) DeletePhoto(modelID, photoID int) (Model, error) {
 // removePhotoFiles deletes a photo and the thumbnail made from it. A photo
 // that never got one leaves nothing behind to miss.
 func (s *Store) removePhotoFiles(p Photo) {
-	_ = os.Remove(filepath.Join(s.PhotoDir(), p.File))
-	if p.Thumb != "" {
-		_ = os.Remove(filepath.Join(s.PhotoDir(), p.Thumb))
+	if path, ok := s.photoPath(p.File); ok {
+		_ = os.Remove(path)
+	}
+	if path, ok := s.photoPath(p.Thumb); ok {
+		_ = os.Remove(path)
 	}
 }
 
@@ -847,7 +972,7 @@ func (s *Store) BackfillThumbs() int {
 	var jobs []job
 	for _, m := range s.data.Models {
 		for _, p := range m.Photos {
-			if p.Thumb == "" {
+			if p.Thumb == "" && safeFileName(p.File) {
 				jobs = append(jobs, job{m.ID, p.ID, p.File})
 			}
 		}
@@ -1049,18 +1174,62 @@ func (s *Store) RenameProject(from, to string) (int, error) {
 			moved++
 		}
 	}
-	kept := s.data.Projects[:0]
+	// Collected rather than picked: a file written before renames merged
+	// can hold more than one record under the old name.
+	var src *ProjectMeta
+	kept := make([]ProjectMeta, 0, len(s.data.Projects))
 	for _, md := range s.data.Projects {
-		switch {
-		case md.Name != from:
+		if md.Name != from {
 			kept = append(kept, md)
-		case to != "":
-			md.Name = to
-			kept = append(kept, md)
+			continue
+		}
+		if src == nil {
+			md := md
+			src = &md
+		} else {
+			// The later record is the one that was being shown, so it wins.
+			*src = mergeProjectMeta(md, *src)
+		}
+	}
+	if src != nil && to != "" {
+		// Renaming onto a project that already exists folds the two together,
+		// so its deadline and notes have to merge rather than sit in a second
+		// row under the same name, where only one of them would ever be read.
+		merged := false
+		for i := range kept {
+			if kept[i].Name == to {
+				kept[i] = mergeProjectMeta(kept[i], *src)
+				merged = true
+				break
+			}
+		}
+		if !merged {
+			src.Name = to
+			kept = append(kept, *src)
 		}
 	}
 	s.data.Projects = kept
 	return moved, s.persist()
+}
+
+// mergeProjectMeta folds one project's details into another's. The project
+// being kept wins on the deadline, since it is the one being renamed onto;
+// notes are never thrown away, so both survive when they differ.
+func mergeProjectMeta(into, from ProjectMeta) ProjectMeta {
+	if strings.TrimSpace(into.Due) == "" {
+		into.Due = from.Due
+	}
+	a, b := strings.TrimSpace(into.Notes), strings.TrimSpace(from.Notes)
+	switch {
+	case b == "" || strings.Contains(a, b):
+		// Nothing to add: no notes, or the same ones already there.
+	case strings.Contains(b, a):
+		// The other record's notes are these plus more - an edit of them.
+		into.Notes = from.Notes
+	default:
+		into.Notes = into.Notes + "\n\n" + from.Notes
+	}
+	return into
 }
 
 // ---------------------------------------------------------------------------
@@ -1116,7 +1285,10 @@ func (s *Store) TimeReport(now time.Time) TimeReport {
 	// a year even where the year has holes in it.
 	rep := TimeReport{Months: []TimeBucket{}, Busiest: []MiniTime{}}
 	index := map[string]int{}
-	first := now.AddDate(0, -11, 0)
+	// Counted from the 1st: AddDate normalises an overflowing day, so stepping
+	// months from the 31st lands on 3 March instead of February and the axis
+	// skips months while repeating others.
+	first := time.Date(now.Year(), now.Month()-11, 1, 0, 0, 0, 0, now.Location())
 	for i := 0; i < 12; i++ {
 		m := first.AddDate(0, i, 0)
 		index[m.Format("2006-01")] = i
@@ -1411,30 +1583,48 @@ func (s *Store) DeletePaint(id int) error {
 			break
 		}
 	}
-	// also unlink it from every mini, so nothing dangles
+	// Unlink it everywhere it is named, so nothing dangles: the minis, the
+	// recipes, and the minis in the trash, which can come back with Undo.
 	for i := range s.data.Models {
-		kept := s.data.Models[i].PaintIDs[:0]
-		for _, pid := range s.data.Models[i].PaintIDs {
-			if pid != id {
-				kept = append(kept, pid)
-			}
-		}
-		s.data.Models[i].PaintIDs = kept
+		s.data.Models[i].PaintIDs = withoutID(s.data.Models[i].PaintIDs, id)
+	}
+	for i := range s.data.Tips {
+		s.data.Tips[i].PaintIDs = withoutID(s.data.Tips[i].PaintIDs, id)
+	}
+	for i := range s.data.Trash {
+		s.data.Trash[i].Model.PaintIDs = withoutID(s.data.Trash[i].Model.PaintIDs, id)
 	}
 	return s.persist()
 }
 
-func (s *Store) PaintUsage(id int) int {
-	n := 0
+// withoutID drops every occurrence of id from a list of ids, in place.
+func withoutID(ids []int, id int) []int {
+	kept := ids[:0]
+	for _, x := range ids {
+		if x != id {
+			kept = append(kept, x)
+		}
+	}
+	return kept
+}
+
+// PaintUsageCounts is how many minis each paint is recorded on, keyed by paint
+// id. It is one pass over the collection rather than one per paint, which
+// matters when a table lists the whole rack of well over a thousand paints.
+func (s *Store) PaintUsageCounts() map[int]int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	counts := map[int]int{}
 	for _, m := range s.data.Models {
+		seen := map[int]bool{}
 		for _, pid := range m.PaintIDs {
-			if pid == id {
-				n++
-				break
+			if !seen[pid] {
+				seen[pid] = true
+				counts[pid]++
 			}
 		}
 	}
-	return n
+	return counts
 }
 
 // UsesPaint reports whether a list of paint ids contains one.

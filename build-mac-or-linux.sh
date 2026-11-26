@@ -10,7 +10,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
-WAILS_VERSION="v2.10.2"
+WAILS_VERSION="v2.17.1"
 
 say()  { printf '  %s\n' "$*"; }
 fail() { printf '\n  [X] %s\n\n' "$*"; exit 1; }
@@ -81,12 +81,11 @@ GOBIN="$(go env GOBIN)"
 [ -n "$GOBIN" ] || GOBIN="$(go env GOPATH)/bin"
 export PATH="$GOBIN:$PATH"
 
-if [ -x "$GOBIN/wails" ]; then
-  say "      Already installed."
-else
-  go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}" \
-    || fail "Could not install the Wails tool (check your internet connection)."
-fi
+# Always installed, even over an existing copy: `go install` of a pinned
+# version is quick when it's already there, and an older Wails left over from
+# a previous build would otherwise be used without a word.
+go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}" \
+  || fail "Could not install the Wails tool (check your internet connection)."
 [ -x "$GOBIN/wails" ] || fail "The Wails tool isn't at $GOBIN/wails after installing."
 say "      Ready."
 
