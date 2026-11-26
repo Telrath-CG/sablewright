@@ -1,0 +1,16 @@
+# What Sablewright says about itself. This is the one place the version is
+# written down: CI reads info.version, checks a pushed tag against it, and
+# stamps it into the binary, the macOS Info.plist, the Windows file
+# properties, the installer and the Linux packages at build time. The other
+# files under build/ hold the rest of these values as fixed text - change one
+# here and change it there too. (Wails can regenerate those files from this
+# one with `wails3 update build-assets`, but that also overwrites the changes
+# made to them for this app, so don't.)
+info:
+  companyName: "Sablewright"
+  productName: "Sablewright"
+  productIdentifier: "io.github.telrath-cg.sablewright"
+  description: "Track your miniature painting projects"
+  copyright: ""
+  comments: "Track your miniature painting projects: progress, paints used and technique notes."
+  version: "2.0.0"

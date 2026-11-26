@@ -3,14 +3,17 @@
 #  Sablewright - build for macOS or Linux
 #
 #  Run:  ./build-mac-or-linux.sh
-#  (first: chmod +x build-mac-or-linux.sh)
+#
+#  The same steps as the release build in .github/workflows/build.yml, so a
+#  local build is the app that ships.
 # ===========================================================
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
-WAILS_VERSION="v2.17.1"
+WAILS_VERSION="v3.1.0"
+GO_MIN_MINOR=26   # Go 1.26 or newer
 
 say()  { printf '  %s\n' "$*"; }
 fail() { printf '\n  [X] %s\n\n' "$*"; exit 1; }
@@ -30,14 +33,19 @@ if ! command -v go >/dev/null 2>&1; then
     Darwin) say "Go isn't installed. Either:"
             say "  brew install go"
             say "  ...or download the .pkg from https://go.dev/dl/" ;;
-    *)      say "Go isn't installed. Either:"
-            say "  sudo apt install golang-go     (Debian/Ubuntu)"
-            say "  ...or download it from https://go.dev/dl/" ;;
+    *)      say "Go isn't installed. Download it from https://go.dev/dl/"
+            say "(the golang-go package in most distributions is too old)." ;;
   esac
   echo
   fail "Install Go, then run this script again."
 fi
-say "      Found $(go version)"
+# Distribution packages of Go often lag well behind, and Wails v3 needs 1.26.
+GOVER="$(go env GOVERSION)"                      # e.g. go1.26.11
+MINOR="$(printf '%s' "$GOVER" | sed -n 's/^go1\.\([0-9]*\).*/\1/p')"
+if [ -z "$MINOR" ] || [ "$MINOR" -lt "$GO_MIN_MINOR" ]; then
+  fail "Found $GOVER, but Sablewright needs Go 1.$GO_MIN_MINOR or newer. Get it from https://go.dev/dl/"
+fi
+say "      Found $GOVER"
 
 # ---------------------------------------------- 2. platform build deps
 case "$(uname -s)" in
@@ -50,24 +58,17 @@ case "$(uname -s)" in
       exit 1
     fi
     say "      Ready."
-    WAILS_TAGS=""
     ;;
   Linux)
-    say "[2/4] Checking GTK/WebKit headers..."
-    # 4.1 first: it is what current distributions ship, and what the released
-    # packages are built against. 4.0 stays as a fallback for older systems
-    # that only have it, and needs no build tag.
-    if pkg-config --exists webkit2gtk-4.1 2>/dev/null; then
-      WAILS_TAGS="-tags webkit2_41"
-      say "      Found webkit2gtk-4.1 (using the webkit2_41 build tag)."
-    elif pkg-config --exists webkit2gtk-4.0 2>/dev/null; then
-      WAILS_TAGS=""
-      say "      Found webkit2gtk-4.0."
+    say "[2/4] Checking GTK 4 and WebKitGTK 6.0 headers..."
+    if pkg-config --exists gtk4 webkitgtk-6.0 2>/dev/null; then
+      say "      Found."
     else
       echo
-      say "Missing the GTK/WebKit development headers. Install them with:"
-      say "  sudo apt install libgtk-3-dev libwebkit2gtk-4.1-dev"
-      say "  # older distros: libwebkit2gtk-4.0-dev"
+      say "Missing the GTK 4 / WebKitGTK 6.0 development headers. These need"
+      say "Ubuntu 24.04, Debian 13, or newer. Install them with:"
+      say "  sudo apt install build-essential pkg-config libgtk-4-dev libwebkitgtk-6.0-dev"
+      say "  # Fedora: sudo dnf install gtk4-devel webkitgtk6.0-devel"
       echo
       fail "Install those, then run this script again."
     fi
@@ -75,80 +76,92 @@ case "$(uname -s)" in
   *) fail "Unsupported system: $(uname -s). Use the .bat script on Windows." ;;
 esac
 
-# ------------------------------------------------------- 3. Wails CLI
-say "[3/4] Installing the Wails build tool..."
+# ------------------------------------------------ 3. Wails CLI (macOS)
+# The app itself builds with plain `go build`. On macOS the Wails CLI is used
+# for one thing, the disk image; Linux doesn't need it.
 GOBIN="$(go env GOBIN)"
 [ -n "$GOBIN" ] || GOBIN="$(go env GOPATH)/bin"
-export PATH="$GOBIN:$PATH"
-
-# Always installed, even over an existing copy: `go install` of a pinned
-# version is quick when it's already there, and an older Wails left over from
-# a previous build would otherwise be used without a word.
-go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}" \
-  || fail "Could not install the Wails tool (check your internet connection)."
-[ -x "$GOBIN/wails" ] || fail "The Wails tool isn't at $GOBIN/wails after installing."
-say "      Ready."
+if [ "$(uname -s)" = "Darwin" ]; then
+  say "[3/4] Installing the Wails tool (for the disk image)..."
+  # Always installed, even over an existing copy: `go install` of a pinned
+  # version is quick when it's already there, and an older one left over
+  # from a previous build would otherwise be used without a word.
+  go install "github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}" \
+    || fail "Could not install the Wails tool (check your internet connection)."
+  say "      Ready."
+else
+  say "[3/4] (No extra tools needed on Linux.)"
+fi
 
 # ---------------------------------------------------------- 4. build
 say "[4/4] Fetching packages and building (slow the first time)..."
-go mod tidy || fail "Could not download the Go packages."
+# download, not tidy: go.mod and go.sum are committed and say exactly what to
+# fetch, and a build shouldn't rewrite them.
+go mod download || fail "Could not download the Go packages (check your internet connection)."
 
-# The version is read from wails.json rather than repeated here, and the
+# The version is read from build/config.yml rather than repeated here, and the
 # commit is stamped alongside it so a build can say exactly what it came from.
 # Both are optional: without them the app just calls itself a dev build.
-VERSION="$(sed -n 's/.*"productVersion"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' wails.json | head -1)"
+VERSION="$(awk '/^info:/{f=1;next} /^[^[:space:]#]/{f=0}
+                f && $1=="version:"{v=$2; gsub(/"/,"",v); print v; exit}' build/config.yml)"
 COMMIT="$(git rev-parse --short HEAD 2>/dev/null || true)"
 LDFLAGS="-w -s"
 [ -n "$VERSION" ] && LDFLAGS="$LDFLAGS -X main.version=$VERSION"
 [ -n "$COMMIT" ]  && LDFLAGS="$LDFLAGS -X main.commit=$COMMIT"
 
+mkdir -p build/bin
 echo
-# shellcheck disable=SC2086
-"$GOBIN/wails" build $WAILS_TAGS -ldflags "$LDFLAGS" || fail "The build failed - the compiler error is above."
+if [ "$(uname -s)" = "Darwin" ]; then
+  # 12.0 is the oldest macOS Wails v3 supports.
+  export MACOSX_DEPLOYMENT_TARGET=12.0
+  # Go's default CFLAGS are -O2 -g, and setting the variable replaces them.
+  export CGO_CFLAGS="-O2 -g -mmacosx-version-min=12.0" CGO_LDFLAGS=-mmacosx-version-min=12.0
+fi
+go build -tags production -trimpath -buildvcs=false -ldflags "$LDFLAGS" -o build/bin/Sablewright . \
+  || fail "The build failed - the compiler error is above."
 echo
 
-OUT="$(find build/bin -maxdepth 1 -mindepth 1 ! -name '*.dmg' 2>/dev/null | head -1)"
-[ -n "$OUT" ] || fail "The build finished but produced nothing in build/bin."
-
-# ------------------------------------------ macOS disk image (optional extra)
-# The releases ship a .dmg, so produce one here too when the tool for it is
-# installed. Not a hard requirement: the .app on its own is what you want for
-# testing your own build, and the disk image only earns its keep when you are
-# handing the build to someone else.
+OUT="build/bin/Sablewright"
 DMG=""
-if [ "$(uname -s)" = "Darwin" ] && [ -d build/bin/Sablewright.app ]; then
-  if command -v create-dmg >/dev/null 2>&1; then
-    say "      Packaging a disk image..."
-
-    # create-dmg images the *contents* of the folder it is given, so the .app
-    # needs a staging directory to itself or the bundle gets unwrapped into
-    # the image. ditto rather than cp: it keeps the permissions and extended
-    # attributes that make the app launchable.
-    STAGE="$(mktemp -d)"
-    ditto build/bin/Sablewright.app "$STAGE/Sablewright.app"
-
-    # --volname leads the array so it is never empty: macOS ships bash 3.2,
-    # where expanding an empty array trips the `set -u` above.
-    OPTS=(--volname Sablewright)
-    ICNS="$(ls build/bin/Sablewright.app/Contents/Resources/*.icns 2>/dev/null | head -1 || true)"
-    [ -n "$ICNS" ] && OPTS+=(--volicon "$ICNS")
-    OPTS+=(--window-pos 200 120 --window-size 600 400 --icon-size 110
-           --icon Sablewright.app 150 190
-           --hide-extension Sablewright.app
-           --app-drop-link 450 190)
-
-    rm -f build/bin/Sablewright.dmg
-    create-dmg "${OPTS[@]}" build/bin/Sablewright.dmg "$STAGE" >/dev/null 2>&1
-    rm -rf "$STAGE"
-
-    if [ -f build/bin/Sablewright.dmg ]; then
-      DMG="build/bin/Sablewright.dmg"
-    else
-      say "      (create-dmg didn't produce one - the .app below is fine.)"
-    fi
-  else
-    say "      Skipping the .dmg - install it with 'brew install create-dmg'."
+if [ "$(uname -s)" = "Darwin" ]; then
+  # Put the .app together the way the release build does: the binary, the
+  # Info.plist with this version, the icon and the license files, then an
+  # ad-hoc signature over the whole bundle so it opens as one app rather than
+  # being called damaged.
+  say "      Assembling Sablewright.app..."
+  APP=build/bin/Sablewright.app
+  # Each step is checked: a bundle missing its binary or its Info.plist would
+  # still sign, and be reported as built.
+  rm -rf "$APP" || fail "Could not clear out the old app bundle."
+  mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" || fail "Could not create the app bundle."
+  mv build/bin/Sablewright "$APP/Contents/MacOS/Sablewright" || fail "Could not put the app into its bundle."
+  cp build/darwin/Info.plist "$APP/Contents/Info.plist" || fail "Could not copy Info.plist."
+  if [ -n "$VERSION" ]; then
+    plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist" \
+      && plutil -replace CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist" \
+      || fail "Could not stamp the version into Info.plist."
   fi
+  cp build/darwin/icons.icns LICENSE THIRD-PARTY-NOTICES.md "$APP/Contents/Resources/" \
+    || fail "Could not copy the icon and license files into the bundle."
+  codesign --force --deep --sign - \
+    --identifier "$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")" "$APP" \
+    || fail "Could not sign the app bundle."
+  OUT="$APP"
+
+  say "      Packaging a disk image..."
+  rm -f build/bin/Sablewright.dmg
+  DMGLOG="$(mktemp)"
+  if "$GOBIN/wails3" tool package --format dmg --name Sablewright --out build/bin \
+       --volume-icon build/darwin/icons.icns >"$DMGLOG" 2>&1 \
+     && [ -f build/bin/Sablewright.dmg ]; then
+    DMG="build/bin/Sablewright.dmg"
+  else
+    # Not fatal - the .app is what you want for trying your own build - but
+    # say why, rather than hiding it.
+    say "      No disk image was made (the .app below is fine). The tool said:"
+    sed 's/^/        /' "$DMGLOG"
+  fi
+  rm -f "$DMGLOG"
   echo
 fi
 
@@ -158,9 +171,10 @@ echo "   Built: $OUT"
 [ -n "$DMG" ] && echo "   Disk image: $DMG"
 case "$(uname -s)" in
   Darwin) echo "   Drag the .app into /Applications and you're set."
-          echo "   (It isn't code-signed, so the first launch is blocked."
-          echo "    Open System Settings -> Privacy & Security and click"
-          echo "    'Open Anyway' near the bottom.)" ;;
+          echo "   (Built here, it opens without a prompt. A copy given to"
+          echo "    someone else isn't signed by Apple, so their first launch"
+          echo "    is blocked until they click 'Open Anyway' in"
+          echo "    System Settings -> Privacy & Security.)" ;;
   Linux)  echo "   That's a self-contained binary - run it directly." ;;
 esac
 echo "  ============================================================"

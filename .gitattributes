@@ -1,0 +1,5 @@
+# The Windows build script runs under cmd.exe, which mis-parses labels and
+# multi-line blocks in a file with Unix line endings, so it is always checked
+# out with CRLF whatever the platform. The shell script needs LF to run at all.
+*.bat text eol=crlf
+*.sh  text eol=lf
