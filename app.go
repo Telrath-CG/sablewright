@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -19,9 +20,14 @@ import (
 // callable from JavaScript as wails.Call.ByName("main.App.MethodName", ...)
 // and returns a Promise; app.js wraps that as App().MethodName(...).
 type App struct {
-	app   *application.App
-	win   *application.WebviewWindow
+	app *application.App
+	// win is set once the window is made, which is after Wails may already
+	// be delivering a second launch's message on another goroutine.
+	win   atomic.Pointer[application.WebviewWindow]
 	store *Store
+	// pageReady is set once the window's page has loaded. Until then an
+	// error from Wails is the window failing to come up at all.
+	pageReady atomic.Bool
 	// loadErr is a non-fatal problem from startup (e.g. an unreadable data
 	// file that we moved aside) which we surface once the UI is up.
 	loadErr string
@@ -52,12 +58,13 @@ func (a *App) ServiceStartup(context.Context, application.ServiceOptions) error 
 // memory and saves all of it, so a second copy would silently undo the
 // first one's changes the next time it saved.
 func (a *App) onSecondInstance(application.SecondInstanceData) {
-	if a.win == nil {
+	w := a.win.Load()
+	if w == nil {
 		return
 	}
-	a.win.UnMinimise()
-	a.win.Show()
-	a.win.Focus()
+	w.UnMinimise()
+	w.Show()
+	w.Focus()
 }
 
 // ---------------------------------------------------------------------------

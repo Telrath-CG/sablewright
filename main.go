@@ -10,8 +10,11 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 //go:embed all:frontend/dist
@@ -108,18 +111,25 @@ func main() {
 			Middleware: photoRoutes(photoHandler{dir: filepath.Join(DataDir(), "photos")}),
 		},
 		SingleInstance: single,
-		// Wails reports a failure it can't recover from here and then exits.
-		// Its logger writes nowhere in a release build, so without this a
-		// window that couldn't be created would just never appear; fatal
-		// leaves a log beside the data and opens it, as it does for a
-		// collection that won't open.
+		// Wails sends its errors here, and its logger writes nowhere in a
+		// release build, so without this a window that couldn't be created
+		// would just never appear. A fatal error - after which Wails exits -
+		// is shown the way a collection that won't open is: a log beside the
+		// data, opened. So is any error before the page has loaded, which is
+		// the window failing to come up: on Windows, WebView2 failing to
+		// start is reported as a plain error and followed by an exit. Errors
+		// once the app is running are only logged.
 		ErrorHandler: func(err error) {
 			var fe *application.FatalError
 			if errors.As(err, &fe) {
-				fatal("Sablewright hit a problem and had to stop.\n\n" + err.Error())
+				fatal("Sablewright hit a problem and had to stop.\n\n" + fe.Unwrap().Error())
 				return
 			}
-			fmt.Fprintln(os.Stderr, err)
+			if !app.pageReady.Load() {
+				fatal("Sablewright could not open its window.\n\n" + err.Error())
+				return
+			}
+			logError(err.Error())
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
@@ -146,10 +156,8 @@ func main() {
 		wails.Menu.Set(menu)
 	}
 
-	// The window is made before the collection is opened so a second launch
-	// in the meantime has a window to bring forward. Nothing is drawn until
-	// Run, by which time the store is in place.
-	app.win = wails.Window.NewWithOptions(application.WebviewWindowOptions{
+	// Nothing is drawn until Run, by which time the store is in place.
+	win := wails.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "Sablewright",
 		Width:            1180,
 		Height:           760,
@@ -157,6 +165,10 @@ func main() {
 		MinHeight:        600,
 		BackgroundColour: application.NewRGB(238, 241, 245),
 	})
+	win.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
+		app.pageReady.Store(true)
+	})
+	app.win.Store(win)
 
 	store, warning, err := NewStore()
 	if err != nil {
@@ -173,15 +185,26 @@ func main() {
 	}
 }
 
-// fatal reports a startup failure. It writes a log next to the data folder and
-// tries to show it, so a double-clicked app never just disappears silently.
-func fatal(msg string) {
-	logPath := filepath.Join(DataDir(), "error_log.txt")
+// errorLogPath is where problems are written down, beside the data folder.
+func errorLogPath() string { return filepath.Join(DataDir(), "error_log.txt") }
+
+// logError appends a problem to the error log without showing it.
+func logError(msg string) {
 	_ = os.MkdirAll(DataDir(), 0o755)
-	if f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
-		fmt.Fprintf(f, "%s\n%s\n\n", strings.Repeat("=", 60), msg)
+	if f, err := os.OpenFile(errorLogPath(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644); err == nil {
+		fmt.Fprintf(f, "%s\n%s %s\n\n", strings.Repeat("=", 60), time.Now().Format(time.RFC3339), msg)
 		f.Close()
 	}
 	fmt.Fprintln(os.Stderr, msg)
-	_ = openPath(logPath)
+}
+
+// showLog opens the error log once, however many failures arrive on the way
+// down.
+var showLog sync.Once
+
+// fatal reports a failure the app can't run past. It writes it to the log
+// and opens that, so a double-clicked app never just disappears silently.
+func fatal(msg string) {
+	logError(msg)
+	showLog.Do(func() { _ = openPath(errorLogPath()) })
 }
