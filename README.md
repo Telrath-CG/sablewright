@@ -200,6 +200,9 @@ bad import, a mass edit, a file that stopped being readable. Only the database
 is copied, since the photos are large and don't change; a manual backup is
 still the one that carries everything.
 
+Only one copy of Sablewright runs at a time. Launching it again brings the open
+window forward, since two copies would each save over the other's changes.
+
 **Deleting a mini** puts it in the trash for 30 days rather than destroying
 it, and the toast offers *Undo* on the spot. Notes and a status can be typed
 again; a photo of a mini part-painted three months ago can't be retaken. It

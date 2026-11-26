@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wailsapp/wails/v2/pkg/options"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -44,6 +45,18 @@ func (a *App) startup(ctx context.Context) {
 		a.store.PurgeTrash(now)
 		a.store.BackfillThumbs()
 	}()
+}
+
+// onSecondInstance brings the open window forward when Sablewright is
+// launched again. Only one copy may run: each holds the whole collection in
+// memory and saves all of it, so a second copy would silently undo the
+// first one's changes the next time it saved.
+func (a *App) onSecondInstance(options.SecondInstanceData) {
+	if a.ctx == nil {
+		return
+	}
+	wruntime.WindowUnminimise(a.ctx)
+	wruntime.WindowShow(a.ctx)
 }
 
 // ---------------------------------------------------------------------------
