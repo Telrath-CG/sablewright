@@ -65,45 +65,32 @@ Sablewright is not affiliated with, endorsed by, or sponsored by any of them.
 
 ## Bundled Go modules
 
-Linked into the released binaries. The set varies slightly by platform — the
-Windows build links all of them except `godbus/dbus`, and the macOS and Linux
-builds omit the Windows-only `go-ole` and `go-webview2`.
+Linked into the released binaries, as `go list -deps -tags production` reports
+for each platform. Wails is in every build; the rest depend on the platform.
+Wails itself carries code written elsewhere under its own licenses, listed
+under it. Each license below is reproduced exactly as its source gives it.
 
-| Module | License |
-|---|---|
-| `github.com/bep/debounce` | MIT |
-| `github.com/go-ole/go-ole` | MIT |
-| `github.com/godbus/dbus/v5` | BSD-2 |
-| `github.com/google/uuid` | BSD-3 |
-| `github.com/leaanthony/go-ansi-parser` | MIT |
-| `github.com/leaanthony/slicer` | MIT |
-| `github.com/leaanthony/u` | MIT |
-| `github.com/pkg/browser` | BSD-2 |
-| `github.com/pkg/errors` | BSD-2 |
-| `github.com/rivo/uniseg` | MIT |
-| `github.com/samber/lo` | MIT |
-| `github.com/tkrajina/go-reflector` | Apache-2.0 |
-| `github.com/wailsapp/go-webview2` | MIT |
-| `github.com/wailsapp/mimetype` | MIT |
-| `github.com/wailsapp/wails/v2` | MIT |
-| `golang.org/x/net` | BSD-3 |
-| `golang.org/x/sys` | BSD-3 |
-| `golang.org/x/text` | BSD-3 |
+| Code | License | Linked into |
+|---|---|---|
+| `github.com/wailsapp/wails/v3` | MIT | all three |
+| — its copy of erikdubbelboer/ringqueue | MIT | all three |
+| — its runtime script's copy of ai/nanoid, and @oxc-project/runtime helpers | MIT | all three |
+| — its copy of go-common-file-dialog | MIT | Windows |
+| — its copy of webviewloader | ISC | Windows |
+| — its `pkg/w32`, from tadvi/winc, AllenDang/w32 and atotto/clipboard | MIT, BSD, BSD-3 | Windows |
+| — its Linux system tray, derived from fyne-io/systray | Apache-2.0 | Linux |
+| `github.com/go-ole/go-ole` | MIT | Windows |
+| `golang.org/x/sys` | BSD-3 | Windows |
+| `github.com/godbus/dbus/v5` | BSD-2 | Linux |
+| The Go standard library | BSD-3 | all three |
 
-### MIT License
+### Wails — MIT License
 
-Applies to: `github.com/bep/debounce`, `github.com/go-ole/go-ole`, `github.com/leaanthony/go-ansi-parser`, `github.com/leaanthony/slicer`, `github.com/leaanthony/u`, `github.com/rivo/uniseg`, `github.com/samber/lo`, `github.com/wailsapp/go-webview2`, `github.com/wailsapp/mimetype`, `github.com/wailsapp/wails/v2`
+Applies to: `github.com/wailsapp/wails/v3` — all three.
 
 ```
-Copyright (c) 2016 Bjørn Erik Pedersen
-Copyright © 2013-2017 Yasuhiro Matsumoto, <mattn.jp@gmail.com>
-Copyright (c) 2021-Present Lea Anthony
-Copyright (c) 2019 Lea Anthony
-Copyright (c) 2023-Present Lea Anthony
-Copyright (c) 2019 Oliver Kuederle
-Copyright (c) 2022-2025 Samuel Berthe
-Copyright (c) 2020 John Chadwick
-Copyright (c) 2018-2020 Gabriel Vasile
+MIT License
+
 Copyright (c) 2018-Present Lea Anthony
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -125,47 +112,266 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
-### BSD 2-Clause License
+### erikdubbelboer/ringqueue — MIT License
 
-Applies to: `github.com/godbus/dbus/v5`, `github.com/pkg/browser`, `github.com/pkg/errors`
+Applies to: copied into Wails' asset server, `internal/assetserver/ringqueue.go` — all three.
 
 ```
-Copyright (c) 2013, Georg Reinke (<guelfey at gmail dot com>), Google
-Copyright (c) 2014, Dave Cheney <dave@cheney.net>
-Copyright (c) 2015, Dave Cheney <dave@cheney.net>
+The MIT License (MIT)
 
-All rights reserved.
+Copyright (c) 2015 Erik Dubbelboer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### ai/nanoid — MIT License
+
+Applies to: copied into the Wails runtime script the page loads, `internal/runtime/desktop/@wailsio/runtime/src/nanoid.ts` — all three.
+
+```
+The MIT License (MIT)
+
+Copyright 2017 Andrey Sitnik <andrey@sitnik.ru>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+    subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+```
+
+### @oxc-project/runtime — MIT License
+
+Applies to: helper functions bundled into the same runtime script by its build — all three.
+
+```
+MIT License
+
+Copyright (c) 2024-present VoidZero Inc. & Contributors
+Copyright (c) 2023 Boshen
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### go-common-file-dialog — MIT License
+
+Applies to: copied into Wails as `internal/go-common-file-dialog` — Windows.
+
+```
+MIT License
+
+Copyright (c) 2019 Harry Phillips
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### webviewloader — ISC License
+
+Applies to: copied into Wails as `internal/webview2/webviewloader` — Windows.
+
+```
+ISC License (ISC)
+
+Copyright (c) 2020 John Chadwick
+Copyright (c) 2022 Wails Project Developers
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+PERFORMANCE OF THIS SOFTWARE.
+```
+
+### tadvi/winc — MIT License
+
+Applies to: parts of Wails' `pkg/w32`, whose files carry "Copyright (C) 2019 Tad Vizbaras" and "Copyright (C) 2019 The Winc Authors" — Windows.
+
+```
+MIT License
+
+Copyright (c) 2019 winc Authors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### AllenDang/w32 — BSD License
+
+Applies to: parts of Wails' `pkg/w32`, whose files carry "Copyright (C) 2010-2012 The W32 Authors" — Windows.
+
+```
+Copyright (c) 2010-2012 The w32 Authors. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
+modification, are permitted provided that the following conditions
+are met:
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in the
+   documentation and/or other materials provided with the distribution.
+3. The names of the authors may not be used to endorse or promote products
+   derived from this software without specific prior written permission.
 
-* Redistributions of source code must retain the above copyright notice, this
-  list of conditions and the following disclaimer.
+THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
+IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
 
-* Redistributions in binary form must reproduce the above copyright notice,
-  this list of conditions and the following disclaimer in the documentation
-  and/or other materials provided with the distribution.
+### atotto/clipboard — BSD 3-Clause License
 
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+Applies to: Wails' `pkg/w32/clipboard.go`, "based on code originally from atotto/clipboard" — Windows.
+
+```
+Copyright (c) 2013 Ato Araki. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+   * Redistributions of source code must retain the above copyright
+notice, this list of conditions and the following disclaimer.
+   * Redistributions in binary form must reproduce the above
+copyright notice, this list of conditions and the following disclaimer
+in the documentation and/or other materials provided with the
+distribution.
+   * Neither the name of @atotto. nor the names of its
+contributors may be used to endorse or promote products derived from
+this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### BSD 3-Clause License
+### go-ole — MIT License
 
-Applies to: `github.com/google/uuid`, `golang.org/x/net`, `golang.org/x/sys`, `golang.org/x/text`
+Applies to: `github.com/go-ole/go-ole` — Windows.
 
 ```
-Copyright (c) 2009,2014 Google Inc. All rights reserved.
-Copyright 2009 The Go Authors.
-Copyright 2009 The Go Authors.
+The MIT License (MIT)
+
+Copyright © 2013-2017 Yasuhiro Matsumoto, <mattn.jp@gmail.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the “Software”), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### x/sys and Go — BSD 3-Clause License
+
+Applies to: `golang.org/x/sys` (Windows), and the Go standard library and runtime compiled into every build.
+
+```
 Copyright 2009 The Go Authors.
 
 Redistribution and use in source and binary forms, with or without
@@ -195,18 +401,44 @@ THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
-### Apache License 2.0
+### godbus — BSD 2-Clause License
 
-Applies to: `github.com/tkrajina/go-reflector`
-
-```
-"Licensor" shall mean the copyright owner or entity authorized by
-```
-
-Licensed under the Apache License, Version 2.0. Full text:
+Applies to: `github.com/godbus/dbus/v5` — Linux.
 
 ```
-Apache License
+Copyright (c) 2013, Georg Reinke (<guelfey at gmail dot com>), Google
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions
+are met:
+
+1. Redistributions of source code must retain the above copyright notice,
+this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+notice, this list of conditions and the following disclaimer in the
+documentation and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED
+TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+### fyne-io/systray — Apache License 2.0
+
+Applies to: Wails' Linux system tray, `pkg/application/systemtray_linux.go`, "derived from github.com/fyne-io/systray" — Linux (the project has no NOTICE file).
+
+```
+                                 Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
 
@@ -394,7 +626,7 @@ Apache License
       same "printed page" as the copyright notice for easier
       identification within third-party archives.
 
-   Copyright [2016-] [Tomo Krajina]
+   Copyright 2014 Brave New Software Project, Inc.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
