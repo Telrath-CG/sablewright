@@ -97,6 +97,13 @@ collection. If a mini has no start date, the earliest log entry becomes it. An
 entry written but not yet added is saved along with the mini, and closing the
 dialog with one still in the form asks first.
 
+**Session timer** — *Start timer* on a mini's detail panel counts while you
+paint. It sits in the sidebar while you move around the app, pauses and
+resumes, and *Stop* opens the log with the minutes filled in. On macOS it also
+shows in the menu bar, with Pause, Resume and Stop in its menu. The timer is
+kept in memory only, so closing or quitting Sablewright with one going asks
+first rather than losing the time.
+
 **Paint Inventory** — the rack comes stocked with 1,419 paints across six
 ranges, so you tick off what you own rather than typing it all in:
 
@@ -160,8 +167,10 @@ recipes use it.
 
 **Photos** — added through a native file picker and *copied* into the app's own
 folder, so moving or deleting the originals later doesn't break anything.
-Click a photo to open it full size. PNG, JPEG, GIF, BMP and WebP are accepted —
-the formats every platform can draw.
+Click a photo to open it full size, or drop pictures from your file manager
+straight onto a mini's photos — on its detail panel or its *Photos* tab — to
+add them as progress shots. PNG, JPEG, GIF, BMP and WebP are accepted — the
+formats every platform can draw.
 
 A thumbnail is generated on import and is what the app actually draws, so a
 mini with a dozen progress shots costs a fraction of the memory it used to;
@@ -216,7 +225,9 @@ is copied, since the photos are large and don't change; a manual backup is
 still the one that carries everything.
 
 Only one copy of Sablewright runs at a time. Launching it again brings the open
-window forward, since two copies would each save over the other's changes.
+window forward, since two copies would each save over the other's changes. The
+window opens where you last left it, at the same size; if that was on a screen
+that's no longer connected, it opens centred instead.
 
 **Deleting a mini** puts it in the trash for 30 days rather than destroying
 it, and the toast offers *Undo* on the spot. Notes and a status can be typed
@@ -228,7 +239,21 @@ days.
 
 **Keyboard** — Tab reaches the sidebar, and Enter or Space opens a screen. On
 the Models screen, ↑ and ↓ walk the list and Enter opens the highlighted mini
-for editing.
+for editing. Shortcuts use ⌘ on macOS and Ctrl elsewhere:
+
+| Shortcut | Does |
+| --- | --- |
+| ⌘N / Ctrl+N | Add a mini |
+| ⌘E / Ctrl+E | Export the selected mini |
+| ⌘F / Ctrl+F | Search the current screen |
+| ⌘1 – ⌘7 / Ctrl+1 – Ctrl+7 | Dashboard, Models, Projects, Paint Inventory, Wishlist, Technique Notes, Time at the Desk |
+
+On macOS the same commands are in the File and View menus, with Back Up,
+Import Backup and Open Data Folder.
+
+**Right-click** a mini in the list, a photo on its detail panel, or a paint in
+the inventory for the things you'd otherwise open it to do: edit, export, use
+as the cover, mark owned, add to the wishlist, or delete.
 
 ### Why JSON and not SQLite
 
