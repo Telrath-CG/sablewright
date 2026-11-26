@@ -20,7 +20,7 @@ to take. Every version carries the same set of downloads:
 | Windows | `Sablewright-Windows.exe`, or `Sablewright-Windows-installer.exe` to install it properly |
 | macOS | `Sablewright-macOS.dmg` — **Apple Silicon only** |
 | Debian, Ubuntu | `sablewright_<version>-<build>_amd64.deb` |
-| Fedora, RHEL, openSUSE | `sablewright-<version>-<build>.x86_64.rpm` |
+| Fedora 40 or newer | `sablewright-<version>-<build>.x86_64.rpm` |
 | Arch | `sablewright-<version>-<build>-x86_64.pkg.tar.zst` |
 | Other Linux | `Sablewright-Linux`, a bare binary |
 
@@ -38,7 +38,8 @@ a build of whatever is on `main` right now. It holds the same set of downloads
 and is replaced wholesale by the next merge, so take it only to try something
 that hasn't been released yet.
 
-**macOS** supports Apple Silicon (M1 and later) and nothing else. No Intel
+**macOS** needs macOS 12 Monterey or newer, on Apple Silicon (M1 and later)
+and nothing else. No Intel
 build is produced, and the one inside the disk image will not run on an Intel
 Mac. The app isn't signed or notarized either, so Gatekeeper blocks the first
 launch: open the disk image, drag Sablewright into the Applications folder
@@ -271,8 +272,8 @@ On macOS the same commands are in the File and View menus, with Back Up,
 Import Backup and Open Data Folder.
 
 **Right-click** a mini in the list, a photo on its detail panel, or a paint in
-the inventory for the things you'd otherwise open it to do: edit, export, use
-as the cover, mark owned, add to the wishlist, or delete.
+the inventory for the things you'd otherwise open it to do: edit, export, open
+full size, use as the cover, mark owned, add to the wishlist, or delete.
 
 ### Why JSON and not SQLite
 
