@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"html"
 	"image/jpeg"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,7 +57,20 @@ func (a *App) ExportMini(id int, format string) (string, error) {
 	if err != nil || path == "" {
 		return "", err
 	}
+	// withExtension can change the name after the save dialog has already
+	// checked it, and a file at the new name was never offered for
+	// replacement - so ask now rather than overwrite it unseen.
+	chosen := path
 	path = withExtension(path, ext)
+	if path != chosen {
+		if _, err := os.Stat(path); err == nil {
+			ok, err := a.Confirm("Replace file",
+				fmt.Sprintf("%s already exists.\n\nReplace it?", filepath.Base(path)), "Replace")
+			if err != nil || !ok {
+				return "", err
+			}
+		}
+	}
 
 	paints := a.paintNames(m.PaintIDs)
 	if markdown {
@@ -127,7 +141,7 @@ func (a *App) exportPhoto(file string) string {
 	var buf strings.Builder
 	enc := base64.NewEncoder(base64.StdEncoding, &buf)
 	shot := orient(downscale(img, exportPhotoMax), turn)
-	if err := jpeg.Encode(enc, shot, &jpeg.Options{Quality: 88}); err != nil {
+	if err := jpeg.Encode(enc, flatten(shot), &jpeg.Options{Quality: 88}); err != nil {
 		return ""
 	}
 	enc.Close()
@@ -309,7 +323,11 @@ func (a *App) exportMarkdown(m Model, paints []Paint, path string) error {
 			if err := os.WriteFile(filepath.Join(dir, p.File), raw, 0o644); err != nil {
 				return err
 			}
-			fmt.Fprintf(&b, "![%s](%s/%s)\n\n", p.Kind, filepath.Base(dir), p.File)
+			// Percent-encoded, because a Markdown link ends at the first
+			// space: an export saved as "Death Guard.md" would otherwise point
+			// its images at a folder called "Death".
+			fmt.Fprintf(&b, "![%s](%s/%s)\n\n", p.Kind,
+				url.PathEscape(filepath.Base(dir)), url.PathEscape(p.File))
 		}
 	}
 
