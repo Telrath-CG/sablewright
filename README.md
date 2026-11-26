@@ -148,7 +148,8 @@ recipes use it.
 
 **Photos** — added through a native file picker and *copied* into the app's own
 folder, so moving or deleting the originals later doesn't break anything.
-Click a photo to open it full size.
+Click a photo to open it full size. PNG, JPEG, GIF, BMP and WebP are accepted —
+the formats every platform can draw.
 
 A thumbnail is generated on import and is what the app actually draws, so a
 mini with a dozen progress shots costs a fraction of the memory it used to;
@@ -190,8 +191,8 @@ opens it. Nothing is uploaded anywhere; the app makes no network connections.
 database and every photo. *Import backup* restores one, which is also how you
 move to a new computer. Importing moves your current collection and photos
 into `backups/before-restore-<date>` first, so importing the wrong file can be
-undone by hand. Only the database and the image files in a backup are read;
-anything else in the zip is ignored.
+undone by hand. Only the database and the photos it names are read from a
+backup; anything else in the zip is ignored.
 
 On top of that the app copies `collection.json` into a `backups` folder every
 time it starts, keeping the last three distinct copies — a launch that changed

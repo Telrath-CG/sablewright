@@ -31,17 +31,22 @@ func NewApp() *App { return &App{} }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
-	// Both of these are housekeeping the user never asked for, so neither is
+	// Read before the page can clear it. A launch that had to set the
+	// collection aside is running on the fresh one that replaced it, and a
+	// snapshot of that would push one of the good copies out of backups/.
+	setAside := a.loadErr != ""
+	// All of this is housekeeping the user never asked for, so none of it is
 	// allowed to hold the window shut. A collection with hundreds of photos
 	// would take a noticeable while to catch its thumbnails up, and until
 	// each one lands the UI simply draws the original.
 	go func() {
 		now := time.Now()
-		if err := a.store.SnapshotOnStartup(now.Format("20060102-150405")); err != nil {
+		if !setAside {
 			// A missing or unreadable file is what the snapshot is for, not
 			// something to interrupt the user over on the way in.
-			_ = err
+			_ = a.store.SnapshotOnStartup(now.Format("20060102-150405"))
 		}
+		a.store.RemoveStaleStaging()
 		a.store.PurgeTrash(now)
 		a.store.BackfillThumbs()
 	}()
@@ -360,9 +365,7 @@ func (a *App) AddPhotos(modelID int, kind string) (*Model, error) {
 			"Product": " (product image)",
 		}[kind],
 		Filters: []wruntime.FileFilter{
-			{DisplayName: "Images (*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp)",
-				Pattern: "*.png;*.jpg;*.jpeg;*.gif;*.bmp;*.webp"},
-			{DisplayName: "All files (*.*)", Pattern: "*.*"},
+			{DisplayName: "Images", Pattern: photoPattern},
 		},
 	})
 	if err != nil {
@@ -404,7 +407,7 @@ func (a *App) SetCoverPhoto(modelID, photoID int) (*Model, error) {
 // and the system opener would just as happily run a script.
 func (a *App) OpenPhoto(file string) error {
 	name := filepath.Base(file)
-	if !isImageFile(name) {
+	if !isViewableImage(name) {
 		return fmt.Errorf("that isn't a photo")
 	}
 	return openPath(filepath.Join(a.store.PhotoDir(), name))

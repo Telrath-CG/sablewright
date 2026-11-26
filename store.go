@@ -254,7 +254,9 @@ var Statuses = []string{"Backlog", "Assembled", "Primed", "In Progress", "Comple
 //	3  the library gained the Citadel Air range
 //	4  the library gained Kimera Kolors, Pure and Signature Blends alike
 //	5  a model entry carries how many minis it is, and how many are finished
-const dataVersion = 5
+//	6  one record of details per project name: renaming a project onto an
+//	   existing one used to leave two, and only one was ever read
+const dataVersion = 6
 
 func today() string { return time.Now().Format("2006-01-02") }
 
@@ -287,8 +289,10 @@ func appDir(name, unixName string) string {
 // the app survived - a collection file that could not be read and was moved
 // aside - which the UI shows once it is up. The error is one it can't start
 // past.
-func NewStore() (s *Store, warning string, err error) {
-	dir := DataDir()
+func NewStore() (s *Store, warning string, err error) { return openStore(DataDir()) }
+
+// openStore is NewStore for a given folder.
+func openStore(dir string) (s *Store, warning string, err error) {
 	if err := os.MkdirAll(filepath.Join(dir, "photos"), 0o755); err != nil {
 		return nil, "", fmt.Errorf("could not create the data folder: %w", err)
 	}
@@ -365,6 +369,7 @@ func decodeData(b []byte) (Data, error) {
 	if d.NextID < 1 {
 		d.NextID = 1
 	}
+	sanitizePhotos(&d)
 	return d, nil
 }
 
@@ -458,7 +463,24 @@ func (s *Store) migrate() {
 			s.data.Models[i].Count = 1
 		}
 	}
+	s.data.Projects = mergeDuplicateProjects(s.data.Projects)
 	s.addLibraryPaints()
+}
+
+// mergeDuplicateProjects folds records that share a name into the first of
+// them, keeping every deadline and note a later one would otherwise hide.
+func mergeDuplicateProjects(in []ProjectMeta) []ProjectMeta {
+	out := make([]ProjectMeta, 0, len(in))
+	at := map[string]int{}
+	for _, p := range in {
+		if i, ok := at[p.Name]; ok {
+			out[i] = mergeProjectMeta(out[i], p)
+			continue
+		}
+		at[p.Name] = len(out)
+		out = append(out, p)
+	}
+	return out
 }
 
 // addLibraryPaints stocks the rack from the built-in library, skipping any
@@ -711,6 +733,9 @@ func (s *Store) SaveModel(m Model) (Model, error) {
 	if m.ID == 0 {
 		m.ID = s.nextID()
 		m.Created = today()
+		// Photos only arrive through AddPhoto, which needs a saved mini, so
+		// a new one has none - whatever the page sent.
+		m.Photos = []Photo{}
 		s.data.Models = append(s.data.Models, m)
 	} else {
 		found := false
@@ -812,9 +837,11 @@ func (s *Store) AddPhoto(modelID int, srcPath, kind string) (Model, error) {
 	if idx < 0 {
 		return Model{}, fmt.Errorf("that mini no longer exists")
 	}
+	// Only picture formats are kept: OpenPhoto hands these files to the
+	// system opener, which would run anything else as readily as show it.
 	ext := strings.ToLower(filepath.Ext(srcPath))
-	if ext == "" {
-		ext = ".jpg"
+	if !photoExts[ext] {
+		return Model{}, fmt.Errorf("%s isn't a picture format Sablewright keeps", filepath.Base(srcPath))
 	}
 	name := fmt.Sprintf("m%d_%d%s", modelID, time.Now().UnixNano(), ext)
 	dst := filepath.Join(s.PhotoDir(), name)
@@ -856,9 +883,11 @@ func (s *Store) DeletePhoto(modelID, photoID int) (Model, error) {
 // removePhotoFiles deletes a photo and the thumbnail made from it. A photo
 // that never got one leaves nothing behind to miss.
 func (s *Store) removePhotoFiles(p Photo) {
-	_ = os.Remove(filepath.Join(s.PhotoDir(), p.File))
-	if p.Thumb != "" {
-		_ = os.Remove(filepath.Join(s.PhotoDir(), p.Thumb))
+	if path, ok := s.photoPath(p.File); ok {
+		_ = os.Remove(path)
+	}
+	if path, ok := s.photoPath(p.Thumb); ok {
+		_ = os.Remove(path)
 	}
 }
 
@@ -908,7 +937,7 @@ func (s *Store) BackfillThumbs() int {
 	var jobs []job
 	for _, m := range s.data.Models {
 		for _, p := range m.Photos {
-			if p.Thumb == "" {
+			if p.Thumb == "" && safeFileName(p.File) {
 				jobs = append(jobs, job{m.ID, p.ID, p.File})
 			}
 		}
@@ -1110,15 +1139,21 @@ func (s *Store) RenameProject(from, to string) (int, error) {
 			moved++
 		}
 	}
+	// Collected rather than picked: a file written before renames merged
+	// can hold more than one record under the old name.
 	var src *ProjectMeta
 	kept := make([]ProjectMeta, 0, len(s.data.Projects))
 	for _, md := range s.data.Projects {
-		if md.Name == from {
-			md := md
-			src = &md
+		if md.Name != from {
+			kept = append(kept, md)
 			continue
 		}
-		kept = append(kept, md)
+		if src == nil {
+			md := md
+			src = &md
+		} else {
+			*src = mergeProjectMeta(*src, md)
+		}
 	}
 	if src != nil && to != "" {
 		// Renaming onto a project that already exists folds the two together,
