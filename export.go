@@ -22,8 +22,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // exportPhotoMax is the long edge of the photos embedded in an export. Bigger
@@ -48,19 +46,13 @@ func (a *App) ExportMini(id int, format string) (string, error) {
 	}
 
 	markdown := strings.EqualFold(strings.TrimSpace(format), "md")
-	ext, filter := ".html", wruntime.FileFilter{
-		DisplayName: "Web page, photos included (*.html)", Pattern: "*.html"}
+	ext, filter := ".html", fileFilter{"Web page, photos included (*.html)", "*.html"}
 	if markdown {
-		ext, filter = ".md", wruntime.FileFilter{
-			DisplayName: "Markdown, photos alongside (*.md)", Pattern: "*.md"}
+		ext, filter = ".md", fileFilter{"Markdown, photos alongside (*.md)", "*.md"}
 	}
 	// One filter, the chosen one: a list to pick from would offer a second
 	// choice that no longer decides anything.
-	path, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
-		Title:           "Export " + m.Name,
-		DefaultFilename: safeFilename(m.Name) + ext,
-		Filters:         []wruntime.FileFilter{filter},
-	})
+	path, err := a.saveFile("Export "+m.Name, safeFilename(m.Name)+ext, filter)
 	if err != nil || path == "" {
 		return "", err
 	}

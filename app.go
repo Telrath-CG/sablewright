@@ -12,15 +12,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/options"
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// App is the object bound to the frontend. Every exported method here is
-// callable from JavaScript as window.go.main.App.MethodName(...) and returns
-// a Promise.
+// App is the service bound to the frontend. Every exported method here is
+// callable from JavaScript as wails.Call.ByName("main.App.MethodName", ...)
+// and returns a Promise; app.js wraps that as App().MethodName(...).
 type App struct {
-	ctx   context.Context
+	app   *application.App
+	win   *application.WebviewWindow
 	store *Store
 	// loadErr is a non-fatal problem from startup (e.g. an unreadable data
 	// file that we moved aside) which we surface once the UI is up.
@@ -29,8 +29,9 @@ type App struct {
 
 func NewApp() *App { return &App{} }
 
-func (a *App) startup(ctx context.Context) {
-	a.ctx = ctx
+// ServiceStartup runs once as the app starts, before the window's page loads.
+// Wails calls it by name; it is not one of the methods the page can call.
+func (a *App) ServiceStartup(context.Context, application.ServiceOptions) error {
 	// All of this is housekeeping the user never asked for, so none of it is
 	// allowed to hold the window shut. A collection with hundreds of photos
 	// would take a noticeable while to catch its thumbnails up, and until
@@ -43,18 +44,20 @@ func (a *App) startup(ctx context.Context) {
 		a.store.PurgeTrash(now)
 		a.store.BackfillThumbs()
 	}()
+	return nil
 }
 
 // onSecondInstance brings the open window forward when Sablewright is
 // launched again. Only one copy may run: each holds the whole collection in
 // memory and saves all of it, so a second copy would silently undo the
 // first one's changes the next time it saved.
-func (a *App) onSecondInstance(options.SecondInstanceData) {
-	if a.ctx == nil {
+func (a *App) onSecondInstance(application.SecondInstanceData) {
+	if a.win == nil {
 		return
 	}
-	wruntime.WindowUnminimise(a.ctx)
-	wruntime.WindowShow(a.ctx)
+	a.win.UnMinimise()
+	a.win.Show()
+	a.win.Focus()
 }
 
 // ---------------------------------------------------------------------------
@@ -198,7 +201,10 @@ func (a *App) SetPaintFlags(id int, owned, wishlist bool) (Paint, error) {
 // CopyText puts the shopping list on the clipboard, which is how it reaches
 // a phone, a notes app, or whatever gets carried into the shop.
 func (a *App) CopyText(s string) error {
-	return wruntime.ClipboardSetText(a.ctx, s)
+	if !a.app.Clipboard.SetText(s) {
+		return fmt.Errorf("could not copy to the clipboard")
+	}
+	return nil
 }
 
 // TimeReport adds up the painting log. The clock is read here rather than in
@@ -352,15 +358,10 @@ func isHexColor(s string) bool {
 // AddPhotos opens a native file picker and copies the chosen images into the
 // app's own photo folder, so moving or deleting the originals is harmless.
 func (a *App) AddPhotos(modelID int, kind string) (*Model, error) {
-	paths, err := wruntime.OpenMultipleFilesDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title: "Choose photo" + map[string]string{
-			"Final":   " (final)",
-			"Product": " (product image)",
-		}[kind],
-		Filters: []wruntime.FileFilter{
-			{DisplayName: "Images", Pattern: photoPattern},
-		},
-	})
+	paths, err := a.openFiles("Choose photo"+map[string]string{
+		"Final":   " (final)",
+		"Product": " (product image)",
+	}[kind], fileFilter{"Images", photoPattern})
 	if err != nil {
 		return nil, err
 	}
@@ -424,11 +425,9 @@ func openPath(p string) error {
 // ---------------------------------------------------------------------------
 
 func (a *App) Backup() (string, error) {
-	dst, err := wruntime.SaveFileDialog(a.ctx, wruntime.SaveDialogOptions{
-		Title:           "Save backup",
-		DefaultFilename: "mini-painting-backup-" + time.Now().Format("2006-01-02") + ".zip",
-		Filters:         []wruntime.FileFilter{{DisplayName: "Zip archive (*.zip)", Pattern: "*.zip"}},
-	})
+	dst, err := a.saveFile("Save backup",
+		"mini-painting-backup-"+time.Now().Format("2006-01-02")+".zip",
+		fileFilter{"Zip archive (*.zip)", "*.zip"})
 	if err != nil || dst == "" {
 		return "", err
 	}
@@ -474,10 +473,7 @@ func addFileToZip(z *zip.Writer, src, name string) error {
 
 // Restore replaces the current collection with the contents of a backup zip.
 func (a *App) Restore() (bool, error) {
-	src, err := wruntime.OpenFileDialog(a.ctx, wruntime.OpenDialogOptions{
-		Title:   "Choose a backup zip",
-		Filters: []wruntime.FileFilter{{DisplayName: "Zip archive (*.zip)", Pattern: "*.zip"}},
-	})
+	src, err := a.openFile("Choose a backup zip", fileFilter{"Zip archive (*.zip)", "*.zip"})
 	if err != nil || src == "" {
 		return false, err
 	}
@@ -495,58 +491,4 @@ func (a *App) Restore() (bool, error) {
 		return false, err
 	}
 	return true, nil
-}
-
-// Confirm shows a native yes/no dialog (used for deletes and other actions
-// that can't be undone).
-//
-// Only macOS draws the buttons it's handed. Windows shows a fixed MB_YESNO
-// pair and Linux a GTK_BUTTONS_YES_NO one, and both answer with the button
-// they actually drew rather than the label asked for - so comparing against
-// okLabel alone reads every confirmation on those two as a refusal, and the
-// action silently never happens. Hence isAffirmative rather than ==.
-func (a *App) Confirm(title, message, okLabel string) (bool, error) {
-	if okLabel == "" {
-		okLabel = "OK"
-	}
-	// The safe button has to be named "No" off macOS: the Windows backend
-	// pre-selects it only when DefaultButton reads exactly that, and without
-	// it the destructive button is the one Enter presses.
-	cancelLabel := "Cancel"
-	if runtime.GOOS != "darwin" {
-		cancelLabel = "No"
-	}
-	choice, err := wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-		Type:          wruntime.QuestionDialog,
-		Title:         title,
-		Message:       message,
-		Buttons:       []string{okLabel, cancelLabel},
-		DefaultButton: cancelLabel,
-		CancelButton:  cancelLabel,
-	})
-	if err != nil {
-		return false, err
-	}
-	return isAffirmative(choice, okLabel), nil
-}
-
-// isAffirmative reports whether a dialog answer means "go ahead". macOS hands
-// back the label it was given; the other two hand back their own word for yes,
-// and GTK says "OK" where Windows says "Ok".
-func isAffirmative(choice, okLabel string) bool {
-	choice = strings.TrimSpace(choice)
-	if choice == "" {
-		return false
-	}
-	switch strings.ToLower(choice) {
-	case "yes", "ok":
-		return true
-	}
-	return strings.EqualFold(choice, strings.TrimSpace(okLabel))
-}
-
-func (a *App) Info(title, message string) {
-	_, _ = wruntime.MessageDialog(a.ctx, wruntime.MessageDialogOptions{
-		Type: wruntime.InfoDialog, Title: title, Message: message,
-	})
 }
