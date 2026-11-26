@@ -17,6 +17,10 @@ type TimerState struct {
 	Mini      string `json:"mini"`      // the mini it is running for; "" when there is no timer
 	Running   bool   `json:"running"`   // false while paused
 	ElapsedMs int64  `json:"elapsedMs"` // on the clock when this was sent
+	// Seq numbers the reports. Each arrives on a request of its own, so two
+	// sent in quick succession - a double-click on Pause - can arrive in
+	// either order; an older one is ignored.
+	Seq int64 `json:"seq"`
 }
 
 // timerTracker is the app's copy of the timer, and the menu-bar item that
@@ -73,6 +77,10 @@ func hoursMinutes(d time.Duration) string {
 func (a *App) TimerChanged(s TimerState) {
 	t := &a.timer
 	t.mu.Lock()
+	if s.Seq != 0 && s.Seq < t.state.Seq {
+		t.mu.Unlock()
+		return
+	}
 	t.state, t.at = s, time.Now()
 	t.mu.Unlock()
 	if runtime.GOOS == "darwin" {
@@ -206,10 +214,14 @@ func (t *timerTracker) startTicking() {
 		for {
 			select {
 			case <-tick:
-				state, label := t.stateAndLabel()
+				// The label is read under trayMu, and only written while this
+				// ticker is still the current one, so a tick can't overwrite
+				// the pause sign a pause has just put up.
 				t.trayMu.Lock()
-				if t.tray != nil && state.Mini != "" {
-					t.tray.SetLabel(label)
+				if t.done == done && t.tray != nil {
+					if state, label := t.stateAndLabel(); state.Mini != "" {
+						t.tray.SetLabel(label)
+					}
 				}
 				t.trayMu.Unlock()
 			case <-done:

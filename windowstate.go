@@ -77,23 +77,71 @@ func grabbable(ws windowState, areas []application.Rect) bool {
 	return false
 }
 
+// fitSize shrinks a saved size to fit the largest of the screens, so a
+// window last sized on a monitor that has since been unplugged can't open
+// with its edges out of reach.
+func fitSize(ws windowState, areas []application.Rect) (int, int) {
+	maxW, maxH := 0, 0
+	for _, a := range areas {
+		maxW, maxH = max(maxW, a.Width), max(maxH, a.Height)
+	}
+	w, h := ws.Width, ws.Height
+	if maxW > 0 {
+		w = max(minWidth, min(w, maxW))
+	}
+	if maxH > 0 {
+		h = max(minHeight, min(h, maxH))
+	}
+	return w, h
+}
+
+// screenAreas waits briefly for Wails to learn the screens - on macOS and
+// Linux it does so on the main thread as the app starts, possibly after this
+// is asked - and returns their work areas, or nothing if they never arrive.
+func screenAreas(app *application.App) []application.Rect {
+	for wait := 0; wait < 40; wait++ {
+		if screens := app.Screen.GetAll(); len(screens) > 0 {
+			areas := make([]application.Rect, 0, len(screens))
+			for _, s := range screens {
+				areas = append(areas, s.WorkArea)
+			}
+			return areas
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return nil
+}
+
 // rememberWindow restores the saved size and position once the app has
 // started, if they still fit the screens, and saves them again whenever the
-// window is moved or resized.
+// window is moved or resized. Where the desktop decides window positions
+// itself - Wayland - only the size comes back.
 func rememberWindow(app *application.App, win *application.WebviewWindow, dir string) {
-	if saved, ok := loadWindowState(dir); ok {
+	saved, haveSaved := loadWindowState(dir)
+
+	// Saved a moment after the last move or resize rather than on every one
+	// - a drag sends dozens. last is the most recent size and position that
+	// wasn't maximised, which is what a maximised window goes back to.
+	var mu sync.Mutex
+	var pending *time.Timer
+	last := saved
+
+	if haveSaved {
 		app.Event.OnApplicationEvent(events.Common.ApplicationStarted, func(*application.ApplicationEvent) {
 			// Off the thread that delivered the event: moving the window
 			// waits for the main thread.
 			go func() {
-				var areas []application.Rect
-				for _, s := range app.Screen.GetAll() {
-					areas = append(areas, s.WorkArea)
+				areas := screenAreas(app)
+				if areas == nil {
+					return
 				}
-				if grabbable(saved, areas) {
-					win.SetBounds(application.Rect{X: saved.X, Y: saved.Y, Width: saved.Width, Height: saved.Height})
+				w, h := fitSize(saved, areas)
+				fits := w == saved.Width && h == saved.Height
+				if fits && grabbable(saved, areas) {
+					win.SetBounds(application.Rect{X: saved.X, Y: saved.Y, Width: w, Height: h})
 				} else {
-					win.SetSize(saved.Width, saved.Height)
+					win.SetSize(w, h)
+					win.Center()
 				}
 				if saved.Maximised {
 					win.Maximise()
@@ -102,11 +150,6 @@ func rememberWindow(app *application.App, win *application.WebviewWindow, dir st
 		})
 	}
 
-	// Saved a moment after the last move or resize rather than on every one
-	// - a drag sends dozens.
-	var mu sync.Mutex
-	var pending *time.Timer
-	var last windowState
 	save := func(*application.WindowEvent) {
 		mu.Lock()
 		defer mu.Unlock()
@@ -114,6 +157,10 @@ func rememberWindow(app *application.App, win *application.WebviewWindow, dir st
 			pending.Stop()
 		}
 		pending = time.AfterFunc(400*time.Millisecond, func() {
+			// Full screen is a mode, not a size to come back at.
+			if win.IsFullscreen() {
+				return
+			}
 			ws := windowState{Maximised: win.IsMaximised()}
 			mu.Lock()
 			// A maximised window keeps the size it will go back to.

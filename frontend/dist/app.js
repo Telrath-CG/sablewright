@@ -464,16 +464,24 @@ function syncDetailTimer() {
 // Go keeps a copy of the timer, so that quitting or closing the window with
 // one going can ask first, and so the macOS menu bar can show it. Every
 // change to the timer comes through drawTimer, so this is sent from there.
+// Numbered, because each report travels on a request of its own and two can
+// overtake each other; Go keeps the newest.
+let timerReports = 0;
 function reportTimer() {
   const s = timerOn()
     ? { mini: timer.modelName, running: !timerPaused(), elapsedMs: Math.round(timerElapsed()) }
     : { mini: "", running: false, elapsedMs: 0 };
+  s.seq = ++timerReports;
   App().TimerChanged(s).catch(() => { /* nothing to show for a missed copy */ });
 }
+// The open dialog's redraw for when the timer changes from outside it - the
+// menu-bar Pause and Resume - so its own timer controls don't go stale.
+let timerListener = null;
 
 function drawTimer() {
   const el = $("#timer");
   reportTimer();
+  if (timerListener) timerListener();
   syncDetailTimer();
   if (!timerOn()) { el.hidden = true; el.innerHTML = ""; return; }
   const paused = timerPaused();
@@ -949,8 +957,7 @@ async function renderModelDetail(id) {
       </div>
       ${progressBar(m.done, m.count)}
       <div class="section">PHOTOS</div>
-      <div class="photos" data-file-drop-target data-mini="${m.id}"
-        title="Drop pictures here to add them as progress photos">${photos}</div>
+      <div class="photos" data-file-drop-target data-mini="${m.id}">${photos}</div>
       <div class="section">PAINTS USED</div>${chips}
       <div class="section">NOTES</div>${noteHtml}
       <div class="section">PAINTING LOG${
@@ -998,6 +1005,7 @@ async function renderPaints() {
     brand: f.brand, range: f.range, stock: f.stock, limit: ROW_LIMIT });
   if (!fresh()) return;
   const shown = page.rows;
+  paintRows = new Map(shown.map(p => [p.id, p]));
 
   const body = page.total ? shown.map(p => `
     <div class="trow" data-id="${p.id}"
@@ -1539,6 +1547,10 @@ async function deletePhoto(modelId, photoId) {
 // returns true when it has dealt with them.
 let dropListener = null;
 
+// The paint table's rows as last drawn, with how many minis use each - which
+// the rack from allPaints() doesn't carry, and the delete warning needs.
+let paintRows = new Map();
+
 async function photosAdded(res) {
   if (res.added) toast(`Added ${plural(res.added, "photo")}` +
     (res.skipped ? ` — ${res.skipped} skipped` : ""));
@@ -1598,11 +1610,13 @@ async function menuAction({ action, id }) {
     case "photo-delete": deletePhoto(a, b); return;
 
     case "paint-edit": case "paint-owned": case "paint-want": case "paint-delete": {
-      const p = (await allPaints()).find(x => x.id === a);
+      const p = paintRows.get(a) || (await allPaints()).find(x => x.id === a);
       if (!p) return;
       if (action === "paint-edit") { paintDialog(p); return; }
       if (action === "paint-delete") {
-        const ok = await call(App().Confirm, "Delete paint", `Delete “${p.name}”?`, "Delete");
+        const used = p.usedOn || 0;
+        const ok = await call(App().Confirm, "Delete paint", `Delete “${p.name}”?` +
+          (used ? `\nIt's currently linked to ${plural(used, "mini", "minis")}.` : ""), "Delete");
         if (!ok) return;
         await call(App().DeletePaint, p.id);
       } else {
@@ -1663,6 +1677,7 @@ function openModal(html, cls = "", owner = null) {
 function closeModal() {
   const hook = closeHook;
   dropListener = null;
+  timerListener = null;
   closeGuard = null;
   closeHook = null;
   openDialog = null;
@@ -1954,8 +1969,11 @@ async function modelDialog(model, opts = {}) {
       const sp = $("#s-stop");
       if (sp) sp.onclick = () => {
         collect();
-        editSession = { ...editSession, minutes: timerMinutes() };
+        const mins = timerMinutes();
+        // Clearing the timer redraws this dialog, re-reading the form, so the
+        // minutes go in after it.
         clearTimer();
+        editSession = { ...editSession, minutes: mins };
         render();
         const n = $("#s-notes");
         if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
@@ -2114,6 +2132,8 @@ async function modelDialog(model, opts = {}) {
   // entry dated before it pulls it back - not the saved value it replaced.
   const earlier = (a, b) => !a ? b : !b ? a : (a < b ? a : b);
   const oldestEntry = sessions => (sessions || []).map(x => x.date).filter(Boolean).sort()[0] || "";
+
+  timerListener = () => { if (isOpen() && tab === "log") { collect(); render(); } };
 
   // Pictures dropped onto the photos tab arrive through Go; when they are
   // for this mini, the tab is redrawn with them.
@@ -2427,11 +2447,22 @@ window.addEventListener("DOMContentLoaded", async () => {
   window.wails.Events.On("menu", ev => menuAction(ev.data || {}));
   window.wails.Events.On("photos-added", ev => photosAdded(ev.data || {}));
   // The menu-bar timer's Pause, Resume and Stop.
-  window.wails.Events.On("timer", ev => {
+  window.wails.Events.On("timer", async ev => {
     if (!timerOn()) return;
-    if (ev.data === "toggle") (timerPaused() ? resumeTimer() : pauseTimer());
-    else if (ev.data === "stop") stopTimer();
+    if (ev.data === "toggle") { timerPaused() ? resumeTimer() : pauseTimer(); return; }
+    if (ev.data !== "stop") return;
+    // Stopping opens the log in a dialog of its own. One already open is
+    // asked to close first - with its own question if it has unsaved work -
+    // and if it stays open, the timer keeps running.
+    if (!$("#modal-backdrop").hidden) {
+      await requestClose();
+      if (!$("#modal-backdrop").hidden) return;
+    }
+    stopTimer();
   });
+  // Go's copy of the timer starts out matching the page's: after a reload
+  // the page's timer is gone, and so should the menu-bar clock be.
+  reportTimer();
   // The build names itself rather than carrying a string the source has to
   // remember to update - the linker stamps it in, so it can't go stale.
   App().Version().then(v => { $("#version").textContent = v; });
