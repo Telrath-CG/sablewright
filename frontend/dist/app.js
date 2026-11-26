@@ -257,8 +257,8 @@ function selectBox(id, options, value, prefix = "") {
 
 /* ---------------------------------------------------------------- theme */
 // An entry in storage is an explicit choice and wins; with nothing stored the
-// app follows the OS. index.html applies the same logic inline before first
-// paint - this half only handles switching and keeps the button label honest.
+// app follows the OS. theme.js applies the same logic before first paint -
+// this half only handles switching and keeps the button label honest.
 const THEME_KEY = "sablewright.theme";
 
 function storedTheme() {
