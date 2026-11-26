@@ -25,9 +25,9 @@ var icon []byte
 
 // Stamped in by the linker at build time - see the -ldflags in
 // .github/workflows/build.yml and both build scripts. The number itself comes
-// from wails.json, which Wails already uses for the Windows file properties,
-// so there is one place to bump rather than several that drift apart. These
-// defaults are what an unstamped `go build` leaves behind.
+// from info.version in build/config.yml, which the build also stamps into each
+// platform's packaging, so there is one place to bump rather than several that
+// drift apart. These defaults are what an unstamped `go build` leaves behind.
 var (
 	version = "dev"
 	commit  = ""

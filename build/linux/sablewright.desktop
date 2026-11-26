@@ -11,6 +11,6 @@ Icon=sablewright
 Terminal=false
 Categories=Graphics;2DGraphics;Utility;
 Keywords=miniature;painting;wargaming;hobby;paint;warhammer;
-# Matches the ProgramName set in main.go's linux.Options, which is what makes
+# Matches the ProgramName set in main.go's LinuxOptions, which is what makes
 # the running window attach to this launcher rather than a generic icon.
 StartupWMClass=Sablewright
