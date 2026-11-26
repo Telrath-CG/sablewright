@@ -94,7 +94,7 @@ func main() {
 		OnStartup:        app.startup,
 		Bind:             []interface{}{app},
 		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId:               "net.dynamicsyntax.sablewright",
+			UniqueId:               "io.github.telrath-cg.sablewright",
 			OnSecondInstanceLaunch: app.onSecondInstance,
 		},
 		Windows: &windows.Options{
