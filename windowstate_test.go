@@ -59,6 +59,15 @@ func TestFitSizeShrinksToTheLargestScreen(t *testing.T) {
 	if w, h := fitSize(windowState{Width: 1200, Height: 800}, laptop); w != 1200 || h != 800 {
 		t.Errorf("fitSize = %dx%d, want the saved 1200x800 unchanged", w, h)
 	}
+	// A window spread across two side-by-side screens keeps its size.
+	two := append(laptop, application.Rect{X: 1512, Y: 0, Width: 2560, Height: 1415})
+	if w, h := fitSize(windowState{Width: 3800, Height: 1000}, two); w != 3800 || h != 1000 {
+		t.Errorf("fitSize = %dx%d, want a window spanning both screens kept at 3800x1000", w, h)
+	}
+	// Windows counts a few invisible border pixels as part of the window.
+	if w, h := fitSize(windowState{Width: 1526, Height: 934}, laptop); w != 1526 || h != 934 {
+		t.Errorf("fitSize = %dx%d, want a window a border wider than the screen kept", w, h)
+	}
 	tiny := []application.Rect{{Width: 800, Height: 500}}
 	if w, h := fitSize(windowState{Width: 1200, Height: 800}, tiny); w != minWidth || h != minHeight {
 		t.Errorf("fitSize = %dx%d, want the minimum %dx%d", w, h, minWidth, minHeight)

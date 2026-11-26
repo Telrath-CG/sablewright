@@ -465,18 +465,22 @@ function syncDetailTimer() {
 // one going can ask first, and so the macOS menu bar can show it. Every
 // change to the timer comes through drawTimer, so this is sent from there.
 // Numbered, because each report travels on a request of its own and two can
-// overtake each other; Go keeps the newest.
-let timerReports = 0;
+// overtake each other; Go keeps the newest. The number comes from the clock,
+// in microseconds, so it keeps rising across a reload of the page - a counter
+// would start again at 1 and every report after the reload would be ignored.
+let lastTimerReport = 0;
 function reportTimer() {
   const s = timerOn()
     ? { mini: timer.modelName, running: !timerPaused(), elapsedMs: Math.round(timerElapsed()) }
     : { mini: "", running: false, elapsedMs: 0 };
-  s.seq = ++timerReports;
+  s.seq = lastTimerReport = Math.max(Date.now() * 1000, lastTimerReport + 1);
   App().TimerChanged(s).catch(() => { /* nothing to show for a missed copy */ });
 }
 // The open dialog's redraw for when the timer changes from outside it - the
 // menu-bar Pause and Resume - so its own timer controls don't go stale.
 let timerListener = null;
+// The open mini dialog's own Stop, when the timer is running for its mini.
+let dialogStop = null;
 
 function drawTimer() {
   const el = $("#timer");
@@ -1678,6 +1682,7 @@ function closeModal() {
   const hook = closeHook;
   dropListener = null;
   timerListener = null;
+  dialogStop = null;
   closeGuard = null;
   closeHook = null;
   openDialog = null;
@@ -2134,6 +2139,21 @@ async function modelDialog(model, opts = {}) {
   const oldestEntry = sessions => (sessions || []).map(x => x.date).filter(Boolean).sort()[0] || "";
 
   timerListener = () => { if (isOpen() && tab === "log") { collect(); render(); } };
+  // The menu bar's Stop, when this dialog is open for the timer's mini: it
+  // stops here, in the log tab, the way the tab's own Stop does - keeping
+  // everything else in the dialog as it is.
+  dialogStop = () => {
+    if (!isOpen() || timer.modelId !== m.id) return false;
+    collect();
+    const mins = timerMinutes();
+    tab = "log";
+    clearTimer();
+    editSession = { ...editSession, minutes: mins };
+    render();
+    const n = $("#s-notes");
+    if (n) { n.focus(); n.setSelectionRange(n.value.length, n.value.length); }
+    return true;
+  };
 
   // Pictures dropped onto the photos tab arrive through Go; when they are
   // for this mini, the tab is redrawn with them.
@@ -2451,12 +2471,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!timerOn()) return;
     if (ev.data === "toggle") { timerPaused() ? resumeTimer() : pauseTimer(); return; }
     if (ev.data !== "stop") return;
-    // Stopping opens the log in a dialog of its own. One already open is
-    // asked to close first - with its own question if it has unsaved work -
-    // and if it stays open, the timer keeps running.
+    // Stopping opens the log in a dialog of its own, and a dialog already
+    // open is never closed from under its unsaved work: if it is this
+    // timer's mini, it stops there, in its own log tab; any other dialog is
+    // left as it is, and the timer keeps running until it's closed.
     if (!$("#modal-backdrop").hidden) {
-      await requestClose();
-      if (!$("#modal-backdrop").hidden) return;
+      if (!(dialogStop && dialogStop())) toast("Close the open dialog first, then stop the timer");
+      return;
     }
     stopTimer();
   });

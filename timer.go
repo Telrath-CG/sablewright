@@ -141,10 +141,12 @@ func (a *App) bringForward() {
 // most desktops don't show it at all. Called off the main thread.
 func (a *App) updateMenuBarTimer() {
 	t := &a.timer
-	state, label := t.stateAndLabel()
-
+	// The state is read once trayMu is held, so two reports handled at once
+	// redraw the menu bar in the order they took it, each with the newest
+	// state - never an older one landing last.
 	t.trayMu.Lock()
 	defer t.trayMu.Unlock()
+	state, label := t.stateAndLabel()
 	if state.Mini == "" {
 		if t.tray != nil {
 			t.tray.Hide()
