@@ -220,10 +220,10 @@ is ever unreadable it's moved aside rather than deleted.
 
 ### Prerequisites
 
-Every platform needs [Go 1.25 or newer](https://go.dev/dl/) and the Wails CLI:
+Every platform needs [Go 1.26 or newer](https://go.dev/dl/) and the Wails CLI:
 
 ```
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
 ```
 
 **There is no Node toolchain to install.** Wails projects normally want npm,

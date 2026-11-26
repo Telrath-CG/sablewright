@@ -10,7 +10,7 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$HERE"
 
-WAILS_VERSION="v2.10.2"
+WAILS_VERSION="v2.17.1"
 
 say()  { printf '  %s\n' "$*"; }
 fail() { printf '\n  [X] %s\n\n' "$*"; exit 1; }

@@ -102,7 +102,7 @@ jobs:
           sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Install Wails CLI
-        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
 
       # One version number for everything. Wails already reads productVersion
       # out of wails.json for the Windows file properties, so making it the

@@ -100,7 +100,7 @@ set "PATH=%GOBIN%;%PATH%"
 if exist "%GOBIN%\wails.exe" (
     echo         Already installed.
 ) else (
-    "%GOEXE%" install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+    "%GOEXE%" install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
 )
 
 if not exist "%GOBIN%\wails.exe" (
